@@ -13,6 +13,14 @@ import uuid
 
 from fastmcp import FastMCP
 
+from perplexity_web_mcp.auth import (
+    create_auth_session,
+    extract_session_token,
+    follow_auth_callback,
+    request_verification_code,
+    resolve_redirect_url,
+    verify_totp,
+)
 from perplexity_web_mcp.models import Models
 from perplexity_web_mcp.shared import (
     COUNCIL_DEFAULT_MODELS_STR,
@@ -74,7 +82,7 @@ mcp = FastMCP(
         "AUTHENTICATION: If you get a 403 error or 'token expired' message:\n"
         "1. pplx_auth_status — check current authentication status\n"
         "2. pplx_auth_request_code — send verification code to email\n"
-        "3. pplx_auth_complete — complete auth with the 6-digit code"
+        "3. pplx_auth_complete — complete email OTP and any requested TOTP challenge"
     ),
 )
 
@@ -683,33 +691,9 @@ def pplx_auth_request_code(email: str) -> str:
     Returns:
         Status message indicating if the code was sent successfully
     """
-    from curl_cffi.requests import Session
-    from orjson import loads
-
-    BASE_URL = "https://www.perplexity.ai"
-
     try:
-        session = Session(impersonate="chrome", headers={"Referer": BASE_URL, "Origin": BASE_URL})
-        session.get(BASE_URL)
-        csrf_data = loads(session.get(f"{BASE_URL}/api/auth/csrf").content)
-        csrf = csrf_data.get("csrfToken")
-
-        if not csrf:
-            return "ERROR: Failed to obtain CSRF token. Please try again."
-
-        response = session.post(
-            f"{BASE_URL}/api/auth/signin/email?version=2.18&source=default",
-            json={
-                "email": email,
-                "csrfToken": csrf,
-                "useNumericOtp": "true",
-                "json": "true",
-                "callbackUrl": f"{BASE_URL}/?login-source=floatingSignup",
-            },
-        )
-
-        if response.status_code != 200:
-            return f"ERROR: Failed to send verification code. Status: {response.status_code}"
+        session, csrf = create_auth_session()
+        request_verification_code(session, csrf, email)
 
         _set_auth_session({"session": session, "email": email})
 
@@ -725,7 +709,7 @@ def pplx_auth_request_code(email: str) -> str:
 
 
 @mcp.tool
-def pplx_auth_complete(email: str, code: str) -> str:
+def pplx_auth_complete(email: str, code: str = "", totp_code: str | None = None) -> str:
     """Complete Perplexity authentication with the verification code.
 
     Use the 6-digit code received via email after calling pplx_auth_request_code.
@@ -734,50 +718,37 @@ def pplx_auth_complete(email: str, code: str) -> str:
     Args:
         email: Your Perplexity account email (same as used in pplx_auth_request_code)
         code: The 6-digit verification code from your email
+        totp_code: The 6-digit authenticator code when TOTP is enabled
 
     Returns:
         Status message with authentication result and subscription tier
     """
-    from curl_cffi.requests import Session
-    from orjson import loads
-
     from perplexity_web_mcp.cli.auth import get_user_info
-
-    BASE_URL = "https://www.perplexity.ai"
-    SESSION_COOKIE_NAME = "__Secure-next-auth.session-token"
 
     try:
         stored = _get_auth_session(email)
         if stored:
             session = stored["session"]
         else:
-            session = Session(impersonate="chrome", headers={"Referer": BASE_URL, "Origin": BASE_URL})
-            session.get(BASE_URL)
+            session, _ = create_auth_session()
 
-        response = session.post(
-            f"{BASE_URL}/api/auth/otp-redirect-link",
-            json={
-                "email": email,
-                "otp": code,
-                "redirectUrl": f"{BASE_URL}/?login-source=floatingSignup",
-                "emailLoginMethod": "web-otp",
-            },
-        )
+        challenge_token = stored.get("challenge_token") if stored else None
+        if challenge_token:
+            if not totp_code:
+                return "TOTP_REQUIRED: Call pplx_auth_complete again with email and totp_code."
+            verify_totp(session, challenge_token, totp_code)
+        else:
+            if not code:
+                return "ERROR: The 6-digit email verification code is required."
+            redirect_url = resolve_redirect_url(session, email, code)
+            challenge_token = follow_auth_callback(session, redirect_url)
+            if challenge_token:
+                _set_auth_session({"session": session, "email": email, "challenge_token": challenge_token})
+                if not totp_code:
+                    return "TOTP_REQUIRED: Call pplx_auth_complete again with email and totp_code."
+                verify_totp(session, challenge_token, totp_code)
 
-        if response.status_code != 200:
-            return "ERROR: Invalid verification code. Please check and try again."
-
-        redirect_path = loads(response.content).get("redirect")
-        if not redirect_path:
-            return "ERROR: No redirect URL received. Please try again."
-
-        redirect_url = f"{BASE_URL}{redirect_path}" if redirect_path.startswith("/") else redirect_path
-
-        session.get(redirect_url)
-        token = session.cookies.get(SESSION_COOKIE_NAME)
-
-        if not token:
-            return "ERROR: Authentication succeeded but token not found."
+        token = extract_session_token(session)
 
         if save_token(token):
             _clear_auth_session()

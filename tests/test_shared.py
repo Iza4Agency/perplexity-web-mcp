@@ -218,6 +218,22 @@ class TestResolveModel:
 class TestAsk:
     """Test the shared ask() function with mocked Perplexity client."""
 
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_SAVE_TO_LIBRARY": "1"}, clear=True)
+    @patch("perplexity_web_mcp.shared.check_limits_before_query", return_value=None)
+    @patch("perplexity_web_mcp.shared.get_limit_cache", return_value=None)
+    @patch("perplexity_web_mcp.shared.get_client")
+    def test_save_to_library_env_reaches_conversation_config(
+        self, mock_client_fn: MagicMock, mock_cache: MagicMock, mock_limits: MagicMock
+    ) -> None:
+        mock_conv = MagicMock(answer="Saved answer", search_results=[], uuid=None)
+        mock_client = MagicMock()
+        mock_client.create_conversation.return_value = mock_conv
+        mock_client_fn.return_value = mock_client
+
+        assert ask("question", Models.BEST) == "Saved answer"
+        config = mock_client.create_conversation.call_args.args[0]
+        assert config.save_to_library is True
+
     @patch("perplexity_web_mcp.shared.check_limits_before_query", return_value=None)
     @patch("perplexity_web_mcp.shared.get_limit_cache", return_value=None)
     @patch("perplexity_web_mcp.shared.get_client")
@@ -498,6 +514,14 @@ class TestAskErrorPropagation:
 
 class TestSharedClientConfig:
     """Verify CLI query clients honor debug environment variables."""
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_SAVE_TO_LIBRARY": "yes"}, clear=True)
+    def test_save_to_library_env_flag_is_enabled(self) -> None:
+        assert shared._save_to_library_from_env() is True
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_SAVE_TO_LIBRARY": "0"}, clear=True)
+    def test_save_to_library_env_flag_defaults_to_disabled(self) -> None:
+        assert shared._save_to_library_from_env() is False
 
     @patch.dict("perplexity_web_mcp.shared.environ", {"LOG_LEVEL": "debug"}, clear=True)
     @patch("perplexity_web_mcp.shared.Perplexity")

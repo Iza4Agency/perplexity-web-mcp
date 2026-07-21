@@ -17,7 +17,14 @@ from typing import Any
 
 from curl_cffi.requests import Session
 
-from .constants import API_BASE_URL, API_VERSION, ENDPOINT_CREDITS, ENDPOINT_RATE_LIMITS, ENDPOINT_USER_SETTINGS, SESSION_COOKIE_NAME
+from .constants import (
+    API_BASE_URL,
+    APP_HEADERS,
+    ENDPOINT_CREDITS,
+    ENDPOINT_RATE_LIMITS,
+    ENDPOINT_USER_SETTINGS,
+    SESSION_COOKIE_NAME,
+)
 from .logging import get_logger
 
 
@@ -305,11 +312,10 @@ def _create_session(token: str) -> Session:
     return Session(
         impersonate="chrome",
         headers={
+            **APP_HEADERS,
             "Referer": API_BASE_URL,
             "Origin": API_BASE_URL,
             "Accept": "application/json",
-            "x-app-apiclient": "default",
-            "x-app-apiversion": API_VERSION,
         },
         cookies={SESSION_COOKIE_NAME: token},
     )

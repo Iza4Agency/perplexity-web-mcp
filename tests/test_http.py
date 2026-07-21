@@ -16,6 +16,12 @@ from perplexity_web_mcp.http import HTTPClient
 class TestHTTPDiagnostics:
     """Verify HTTP errors preserve endpoint context."""
 
+    def test_session_includes_perplexity_app_headers(self) -> None:
+        client = HTTPClient("token", requests_per_second=0, max_retries=0, rotate_fingerprint=False)
+
+        assert client._session.headers["x-app-apiclient"] == "default"
+        assert client._session.headers["x-app-apiversion"] == "2.18"
+
     def test_init_search_403_includes_endpoint_context(self) -> None:
         client = HTTPClient("token", requests_per_second=0, max_retries=0, rotate_fingerprint=False)
         client._session = MagicMock()

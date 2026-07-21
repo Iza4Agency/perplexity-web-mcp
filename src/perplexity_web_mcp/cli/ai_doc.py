@@ -240,7 +240,7 @@ AUTH TOOLS (3):
   pplx_auth_request_code(email)
       Send 6-digit verification code to email.
 
-  pplx_auth_complete(email, code)
+  pplx_auth_complete(email, code, totp_code=None)
       Complete auth with code from email. Saves token automatically.
 
 ================================================================================
@@ -258,7 +258,9 @@ Three ways to authenticate (all store token at ~/.config/perplexity-web-mcp/toke
 
 3. MCP TOOLS (AI agent without shell):
    pplx_auth_request_code(email="user@example.com")  # Sends code
-   pplx_auth_complete(email="user@example.com", code="123456")  # Completes
+   pplx_auth_complete(email="user@example.com", code="123456")  # Completes email OTP
+   # If TOTP_REQUIRED is returned:
+   pplx_auth_complete(email="user@example.com", totp_code="654321")
 
 Tokens last ~30 days. Re-authenticate when you get 403 errors.
 Check status: pwm login --check  OR  pplx_auth_status()

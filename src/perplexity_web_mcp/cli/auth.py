@@ -8,18 +8,25 @@ from sys import exit
 from typing import NoReturn
 
 from curl_cffi.requests import Session
-from orjson import loads
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
+from perplexity_web_mcp.auth import (
+    create_auth_session,
+    extract_session_token,
+    follow_auth_callback,
+    request_verification_code,
+    resolve_redirect_url,
+    verify_totp,
+)
+from perplexity_web_mcp.constants import API_BASE_URL, APP_HEADERS, SESSION_COOKIE_NAME
 from perplexity_web_mcp.token_store import load_token
 from perplexity_web_mcp.token_store import save_token as save_token_to_config
 
 
-BASE_URL: str = "https://www.perplexity.ai"
-SESSION_COOKIE_NAME: str = "__Secure-next-auth.session-token"
+BASE_URL: str = API_BASE_URL
 
 console = Console(stderr=True, soft_wrap=True)
 
@@ -96,7 +103,7 @@ def get_user_info(token: str) -> UserInfo | None:
     try:
         with Session(
             impersonate="chrome",
-            headers={"Referer": BASE_URL, "Origin": BASE_URL},
+            headers={**APP_HEADERS, "Referer": BASE_URL, "Origin": BASE_URL},
             cookies={SESSION_COOKIE_NAME: token},
         ) as session:
             response = session.get(f"{BASE_URL}/api/user")
@@ -110,77 +117,45 @@ def get_user_info(token: str) -> UserInfo | None:
 
 def _initialize_session() -> tuple[Session, str]:
     """Initialize session and obtain CSRF token."""
-
-    session = Session(impersonate="chrome", headers={"Referer": BASE_URL, "Origin": BASE_URL})
-
     with console.status("[bold green]Initializing secure connection...", spinner="dots"):
-        session.get(BASE_URL)
-        csrf_data = loads(session.get(f"{BASE_URL}/api/auth/csrf").content)
-        csrf = csrf_data.get("csrfToken")
-
-        if not csrf:
-            raise ValueError("Failed to obtain CSRF token.")
-
-    return session, csrf
+        return create_auth_session()
 
 
 def _request_verification_code(session: Session, csrf: str, email: str) -> None:
     """Send verification code to user's email."""
-
     with console.status("[bold green]Sending verification code...", spinner="dots"):
-        response = session.post(
-            f"{BASE_URL}/api/auth/signin/email?version=2.18&source=default",
-            json={
-                "email": email,
-                "csrfToken": csrf,
-                "useNumericOtp": "true",
-                "json": "true",
-                "callbackUrl": f"{BASE_URL}/?login-source=floatingSignup",
-            },
-        )
-
-        if response.status_code != 200:
-            raise ValueError(f"Authentication request failed: {response.text}")
+        request_verification_code(session, csrf, email)
 
 
 def _validate_and_get_redirect_url(session: Session, email: str, user_input: str) -> str:
     """Validate user input (OTP or magic link) and return redirect URL."""
-
     with console.status("[bold green]Validating...", spinner="dots"):
-        if user_input.startswith("http"):
-            return user_input
-
-        response_otp = session.post(
-            f"{BASE_URL}/api/auth/otp-redirect-link",
-            json={
-                "email": email,
-                "otp": user_input,
-                "redirectUrl": f"{BASE_URL}/?login-source=floatingSignup",
-                "emailLoginMethod": "web-otp",
-            },
-        )
-
-        if response_otp.status_code != 200:
-            raise ValueError("Invalid verification code.")
-
-        redirect_path = loads(response_otp.content).get("redirect")
-
-        if not redirect_path:
-            raise ValueError("No redirect URL received.")
-
-        return f"{BASE_URL}{redirect_path}" if redirect_path.startswith("/") else redirect_path
+        return resolve_redirect_url(session, email, user_input)
 
 
-def _extract_session_token(session: Session, redirect_url: str) -> str:
-    """Extract session token from cookies after authentication."""
+def _complete_auth_callback(session: Session, redirect_url: str, totp_code: str | None = None) -> str:
+    """Complete the callback and optional TOTP challenge, then return the session token."""
+    challenge_token = follow_auth_callback(session, redirect_url)
+    if challenge_token:
+        if not totp_code:
+            raise ValueError("TOTP is required. Re-run with --totp-code and the code from your authenticator app.")
+        verify_totp(session, challenge_token, totp_code)
+    return extract_session_token(session)
 
-    session.get(redirect_url)
-    token = session.cookies.get(SESSION_COOKIE_NAME)
 
-    if not token:
-        raise ValueError("Authentication successful, but token not found.")
+def _prompt_and_verify_totp(session: Session, challenge_token: str) -> None:
+    """Prompt until a valid TOTP code completes the challenge."""
+    console.print("\n[bold cyan]Step 3: Two-Factor Authentication[/bold cyan]")
+    console.print("  Enter the 6-digit code from your authenticator app.")
 
-    return token
+    while True:
+        totp_code = Prompt.ask("  Enter TOTP code", console=console).strip()
+        try:
+            with console.status("[bold green]Verifying TOTP...", spinner="dots"):
+                verify_totp(session, challenge_token, totp_code)
+            return
+        except ValueError as error:
+            console.print(f"[red]  {error}[/red]")
 
 
 def _display_user_info(user_info: UserInfo) -> None:
@@ -245,13 +220,19 @@ def _show_exit_message() -> None:
     console.input()
 
 
-def auth_non_interactive(email: str, code: str | None = None, auto_save: bool = True) -> str | None:
+def auth_non_interactive(
+    email: str,
+    code: str | None = None,
+    auto_save: bool = True,
+    totp_code: str | None = None,
+) -> str | None:
     """Non-interactive authentication for AI agents.
 
     Args:
         email: Perplexity account email
         code: 6-digit verification code (if None, sends code and returns None)
         auto_save: Whether to automatically save token to config
+        totp_code: Optional 6-digit authenticator code for accounts with TOTP enabled
 
     Returns:
         Session token if code provided, None if code was sent
@@ -275,7 +256,7 @@ def auth_non_interactive(email: str, code: str | None = None, auto_save: bool = 
 
         # Step 2: Complete authentication
         redirect_url = _validate_and_get_redirect_url(session, email, code)
-        token = _extract_session_token(session, redirect_url)
+        token = _complete_auth_callback(session, redirect_url, totp_code)
 
         # Verify token works
         user_info = get_user_info(token)
@@ -318,6 +299,7 @@ def main() -> NoReturn:
                 "  --check          Check if authenticated without logging in\n"
                 "  --email EMAIL    Email address for non-interactive auth\n"
                 "  --code CODE      6-digit verification code from email\n"
+                "  --totp-code CODE 6-digit code from your authenticator app\n"
                 "  --no-save        Don't save token to config (non-interactive only)\n"
                 "  -h, --help       Show this help message\n\n"
                 "[bold cyan]Token Storage:[/bold cyan]\n"
@@ -364,13 +346,18 @@ def main() -> NoReturn:
             code_idx = args.index("--code")
             code = args[code_idx + 1] if code_idx + 1 < len(args) else None
 
+        totp_code = None
+        if "--totp-code" in args:
+            totp_idx = args.index("--totp-code")
+            totp_code = args[totp_idx + 1] if totp_idx + 1 < len(args) else None
+
         no_save = "--no-save" in args
 
         if not email:
             print("Error: --email requires an email address")
             exit(1)
 
-        result = auth_non_interactive(email, code, auto_save=not no_save)
+        result = auth_non_interactive(email, code, auto_save=not no_save, totp_code=totp_code)
         exit(0 if result or code is None else 1)
 
     # Interactive mode (original behavior)
@@ -387,8 +374,10 @@ def main() -> NoReturn:
         console.print("  Check your email for a [bold]6-digit code[/bold] or [bold]magic link[/bold].")
         user_input = Prompt.ask("  Enter code or paste link", console=console).strip()
         redirect_url = _validate_and_get_redirect_url(session, email, user_input)
-
-        token = _extract_session_token(session, redirect_url)
+        challenge_token = follow_auth_callback(session, redirect_url)
+        if challenge_token:
+            _prompt_and_verify_totp(session, challenge_token)
+        token = extract_session_token(session)
 
         _display_and_save_token(token)
 

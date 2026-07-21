@@ -9,6 +9,12 @@ from typing import Final
 API_VERSION: Final[str] = "2.18"
 """Current API version used by Perplexity WebUI."""
 
+APP_HEADERS: Final[dict[str, str]] = {
+    "x-app-apiclient": "default",
+    "x-app-apiversion": API_VERSION,
+}
+"""Headers used by the Perplexity web application for internal API requests."""
+
 API_BASE_URL: Final[str] = "https://www.perplexity.ai"
 """Base URL for all API requests."""
 
@@ -52,6 +58,7 @@ JSON_OBJECT_PATTERN: Final[Pattern[str]] = compile(r"^\{.*\}$")
 """Pattern to detect JSON object strings."""
 
 DEFAULT_HEADERS: Final[dict[str, str]] = {
+    **APP_HEADERS,
     "Accept": "text/event-stream, application/json",
     "Content-Type": "application/json",
 }

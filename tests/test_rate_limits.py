@@ -24,6 +24,7 @@ from perplexity_web_mcp.rate_limits import (
     RateLimits,
     SourceLimit,
     UserSettings,
+    _create_session,
     fetch_rate_limits,
     fetch_user_settings,
 )
@@ -33,6 +34,14 @@ from perplexity_web_mcp.token_store import load_token
 # ============================================================================
 # Fixtures: realistic API response payloads
 # ============================================================================
+
+
+def test_rate_limit_session_includes_perplexity_app_headers() -> None:
+    """REST helpers send the headers expected by Perplexity's web app."""
+    with _create_session("token") as session:
+        assert session.headers["x-app-apiclient"] == "default"
+        assert session.headers["x-app-apiversion"] == "2.18"
+        assert session.headers["Accept"] == "application/json"
 
 
 @pytest.fixture

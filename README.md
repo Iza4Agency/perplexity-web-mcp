@@ -232,7 +232,11 @@ pwm login                                    # Interactive login (email + OTP)
 pwm login --check                            # Check if authenticated
 pwm login --email user@example.com           # Send verification code (non-interactive)
 pwm login --email user@example.com --code 123456  # Complete auth with code
+pwm login --email user@example.com --code 123456 --totp-code 654321  # Account with TOTP enabled
 ```
+
+Set `PWM_SAVE_TO_LIBRARY=1` to save shared CLI and MCP queries to the Perplexity thread library. Queries are
+incognito by default.
 
 ### Usage & Limits
 
@@ -418,7 +422,7 @@ claude mcp add perplexity pwm-mcp
 | `pplx_connectors`        | List connector source IDs       |
 | `pplx_auth_status`       | Check authentication status     |
 | `pplx_auth_request_code` | Send verification code to email |
-| `pplx_auth_complete`     | Complete auth with 6-digit code |
+| `pplx_auth_complete`     | Complete email and TOTP authentication |
 
 All query tools support `source_focus`: `none`, `web`, `academic`, `social`, `finance`, `all`, or a connector source ID returned by `pplx_connectors()`.
 
@@ -548,6 +552,9 @@ pwm login --email your@email.com --code 123456
 1. Call `pplx_auth_request_code(email="your@email.com")`
 2. Check email for 6-digit code
 3. Call `pplx_auth_complete(email="your@email.com", code="123456")`
+
+If the tool returns `TOTP_REQUIRED`, call it again with
+`pplx_auth_complete(email="your@email.com", totp_code="654321")`.
 
 ### Diagnose Issues
 

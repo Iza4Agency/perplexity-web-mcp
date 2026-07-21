@@ -210,7 +210,7 @@ User wants to...
 +-- Authenticate / re-authenticate
 |   +-- Interactive:      pwm login
 |   +-- Non-interactive:  pwm login --email EMAIL  then  pwm login --email EMAIL --code CODE
-|   +-- MCP (no shell):   pplx_auth_request_code(email)  then  pplx_auth_complete(email, code)
+|   +-- MCP (no shell):   pplx_auth_request_code(email), then pplx_auth_complete(email, code[, totp_code])
 |
 +-- Start MCP server
 |   +-- pwm-mcp
@@ -360,7 +360,7 @@ pwm usage --refresh         # Force-refresh from server
 | `pplx_connectors`               | FREE                                    | List account connector source IDs for `source_focus`                                                                                                                                   |
 | `pplx_auth_status`              | FREE                                    | Check auth status                                                                                                                                                                      |
 | `pplx_auth_request_code`        | FREE                                    | Send verification code                                                                                                                                                                 |
-| `pplx_auth_complete`            | FREE                                    | Complete auth with code                                                                                                                                                                |
+| `pplx_auth_complete`            | FREE                                    | Complete email and optional TOTP authentication                                                                                                                                         |
 
 All query tools accept `source_focus`: `"none"`, `"web"`, `"academic"`, `"social"`, `"finance"`, `"all"`, or a connector source ID from `pplx_connectors()`.
 Use `source_focus="none"` for model-only queries without web search.

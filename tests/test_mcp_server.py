@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from perplexity_web_mcp.mcp import server
 from perplexity_web_mcp.models import Models
@@ -29,3 +29,27 @@ def test_removed_gpt_tools_are_not_exposed() -> None:
     assert not hasattr(server, "pplx_gpt54_thinking")
     assert not hasattr(server, "pplx_gpt55")
     assert not hasattr(server, "pplx_gpt55_thinking")
+
+
+def test_mcp_auth_preserves_totp_challenge_between_calls() -> None:
+    """MCP clients can submit TOTP after the email OTP callback requests it."""
+    session = MagicMock()
+    server._set_auth_session({"session": session, "email": "user@example.com"})
+
+    try:
+        with (
+            patch.object(server, "resolve_redirect_url", return_value="https://callback"),
+            patch.object(server, "follow_auth_callback", return_value="challenge-123"),
+            patch.object(server, "verify_totp") as verify,
+            patch.object(server, "extract_session_token", return_value="session-token"),
+            patch.object(server, "save_token", return_value=True),
+            patch("perplexity_web_mcp.cli.auth.get_user_info", return_value=None),
+        ):
+            first = server.pplx_auth_complete.fn("user@example.com", "654321")
+            second = server.pplx_auth_complete.fn("user@example.com", totp_code="123456")
+
+        assert first.startswith("TOTP_REQUIRED")
+        assert second.startswith("SUCCESS")
+        verify.assert_called_once_with(session, "challenge-123", "123456")
+    finally:
+        server._clear_auth_session()

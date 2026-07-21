@@ -255,9 +255,12 @@ Complete authentication with the verification code. Second step of re-authentica
 ```
 pplx_auth_complete(
     email: str,                    # Required. Same email used in pplx_auth_request_code.
-    code: str,                     # Required. 6-digit code from email.
+    code: str = "",                # 6-digit code from email.
+    totp_code: str | None = None,  # Authenticator code when TOTP is enabled.
 ) -> str
 ```
+
+If the first completion call returns `TOTP_REQUIRED`, call the tool again with `email` and `totp_code`.
 
 ## Response Format
 
