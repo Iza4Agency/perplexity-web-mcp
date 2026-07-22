@@ -4,6 +4,30 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.3] - 2026-07-21
+
+### Added
+
+- **Continuous integration** — Added GitHub Actions checks for Ruff linting, formatting, and the unit suite across Python 3.10–3.13.
+- **TOTP authentication** — Added explicit TOTP challenge support to interactive, non-interactive, and MCP authentication flows.
+- **Authentication regression coverage** — Added tests for callback redirects, TOTP challenges, Perplexity application headers, MCP challenge persistence, and chunked session cookies.
+
+### Changed
+
+- **Perplexity application headers** — Added the current `x-app-apiclient` and `x-app-apiversion` headers to query and account-limit sessions to avoid Cloudflare 403 responses.
+- **Thread library opt-in** — Added `PWM_SAVE_TO_LIBRARY` for saving shared CLI and MCP queries to the Perplexity thread library; queries remain incognito by default.
+- **Community contribution** — Thanks to [@Vitamin4107](https://github.com/Vitamin4107) for contributing both improvements in [#15](https://github.com/jacob-bd/perplexity-web-mcp/pull/15).
+- **Shared authentication protocol** — Consolidated duplicated CLI and MCP callback handling into one authentication module.
+- **Documentation and skills** — Updated authentication, configuration, MCP tool, quick-start, bundled skill, and desktop-extension documentation, and aligned all version metadata at `0.14.3`.
+
+### Fixed
+
+- **Session token extraction** — Reassembles session tokens split across multiple cookies instead of reporting that no token was found.
+- **Python 3.10 setup support** — Added the `tomli` fallback required by the package's declared Python 3.10 support.
+- **Environment-independent setup tests** — Removed a host-dependent Codex configuration assertion that failed on clean CI runners.
+
+---
+
 ## [0.14.2] - 2026-07-14
 
 ### Changed

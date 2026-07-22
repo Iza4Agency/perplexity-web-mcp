@@ -5,7 +5,7 @@ Get up and running with Perplexity Web MCP in under 5 minutes.
 ## Prerequisites
 
 - **Python 3.10–3.13**
-- **Perplexity Pro or Max subscription** — required for premium models (GPT-5.4, Claude 4.6, Gemini 3.1 Pro, Nemotron)
+- **Perplexity account** — Free accounts can use supported basic features; Pro or Max is required for premium models such as GPT-5.6 Terra, Claude Sonnet 5, Gemini 3.1 Pro, and Nemotron 3 Ultra
 
 ## 1. Install
 
@@ -36,7 +36,7 @@ Log in with your Perplexity account:
 pwm login
 ```
 
-This opens your browser, you sign in, and the CLI stores your session token locally at `~/.config/perplexity-web-mcp/token`.
+The CLI sends a verification code to your Perplexity email and stores the resulting session token locally at `~/.config/perplexity-web-mcp/token`. If your account uses TOTP, it also prompts for the code from your authenticator app.
 
 Check it worked:
 
@@ -51,6 +51,7 @@ pwm login --check
 ```bash
 pwm login --email you@example.com        # sends a verification code
 pwm login --email you@example.com --code 123456   # completes the login
+pwm login --email you@example.com --code 123456 --totp-code 654321  # account with TOTP enabled
 ```
 
 ## 3. Your First Query
@@ -64,7 +65,7 @@ pwm ask "What is quantum computing?"
 The CLI auto-selects the best model based on your quota. You can also pick a specific model:
 
 ```bash
-pwm ask "Compare React and Vue" -m gpt54
+pwm ask "Compare React and Vue" -m gpt56_terra
 pwm ask "Explain attention" -m claude_sonnet --thinking
 ```
 
@@ -86,7 +87,7 @@ Get perspectives from multiple models at once:
 pwm council "Compare Rust and Go for backend development"
 ```
 
-Each model costs 1 Pro Search. Default: 3 models (GPT-5.4, Claude Opus, Gemini Pro).
+Each model costs 1 Pro Search. The default council uses GPT-5.6 Terra, Claude Sonnet 5, and Gemini 3.1 Pro, followed by Sonar 2 synthesis.
 
 ## 4. Check Your Quotas
 
@@ -133,15 +134,20 @@ This verifies your installation, authentication, MCP config, skill status, rate 
 
 ## Available Models
 
-| Name             | Provider   | Thinking  | Tier                    |
-| ---------------- | ---------- | --------- | ----------------------- |
-| `auto` / `sonar` | Perplexity | No        | Pro (1 Pro Search each) |
-| `deep_research`  | Perplexity | No        | Monthly quota           |
-| `gpt54`          | OpenAI     | Toggle    | Pro                     |
-| `claude_sonnet`  | Anthropic  | Toggle    | Pro                     |
-| `claude_opus`    | Anthropic  | Toggle    | Max                     |
-| `gemini_pro`     | Google     | Always on | Pro                     |
-| `nemotron`       | NVIDIA     | Always on | Pro                     |
+| Name             | Provider   | Thinking  | Tier          |
+| ---------------- | ---------- | --------- | ------------- |
+| `auto`           | Perplexity | No        | Account quota |
+| `sonar`          | Perplexity | No        | Account quota |
+| `deep_research`  | Perplexity | No        | Monthly quota |
+| `gpt56_terra`    | OpenAI     | Toggle    | Pro           |
+| `gpt56_sol`      | OpenAI     | Toggle    | Max           |
+| `grok45`         | xAI        | Toggle    | Pro           |
+| `claude_sonnet`  | Anthropic  | Toggle    | Pro           |
+| `claude_opus`    | Anthropic  | Toggle    | Max           |
+| `gemini_pro`     | Google     | Always on | Pro           |
+| `nemotron`       | NVIDIA     | Always on | Pro           |
+| `glm52`          | Z.ai       | Always on | Pro           |
+| `kimi_k26`       | Moonshot   | Toggle    | Pro           |
 
 ## Source Focus
 

@@ -241,7 +241,7 @@ AUTH TOOLS (3):
       Send 6-digit verification code to email.
 
   pplx_auth_complete(email, code, totp_code=None)
-      Complete auth with code from email. Saves token automatically.
+      Complete email OTP and optional TOTP authentication. Saves token automatically.
 
 ================================================================================
 AUTHENTICATION
@@ -255,6 +255,7 @@ Three ways to authenticate (all store token at ~/.config/perplexity-web-mcp/toke
 2. NON-INTERACTIVE CLI (AI agent with shell access):
    pwm login --email user@example.com          # Sends code
    pwm login --email user@example.com --code 123456  # Completes auth
+   pwm login --email user@example.com --code 123456 --totp-code 654321  # TOTP account
 
 3. MCP TOOLS (AI agent without shell):
    pplx_auth_request_code(email="user@example.com")  # Sends code

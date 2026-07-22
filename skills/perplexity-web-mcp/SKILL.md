@@ -2,7 +2,7 @@
 name: perplexity-web-mcp
 description: 'Search the web and query AI models via Perplexity AI using perplexity-web-mcp-cli. Supports CLI commands (pwm ask, pwm research), MCP tools (pplx_*), and Anthropic/OpenAI-compatible API server. Use when the user mentions "perplexity", "pplx", "pwm", "web search with AI", "deep research", "search the internet", or wants to query premium models like GPT-5.6 Terra, GPT-5.6 Sol, Grok, Claude, Gemini, GLM, or Nemotron through Perplexity''s web interface.'
 metadata:
-  version: "0.14.2"
+  version: "0.14.3"
   author: "Jacob BD"
 ---
 
@@ -209,8 +209,8 @@ User wants to...
 |
 +-- Authenticate / re-authenticate
 |   +-- Interactive:      pwm login
-|   +-- Non-interactive:  pwm login --email EMAIL  then  pwm login --email EMAIL --code CODE
-|   +-- MCP (no shell):   pplx_auth_request_code(email)  then  pplx_auth_complete(email, code)
+|   +-- Non-interactive:  pwm login --email EMAIL, then pwm login --email EMAIL --code CODE [--totp-code CODE]
+|   +-- MCP (no shell):   pplx_auth_request_code(email), then pplx_auth_complete(email, code[, totp_code])
 |
 +-- Start MCP server
 |   +-- pwm-mcp
@@ -326,7 +326,10 @@ pwm login                                                # Interactive
 pwm login --check                                        # Check status
 pwm login --email user@example.com                       # Send code
 pwm login --email user@example.com --code 123456         # Complete
+pwm login --email user@example.com --code 123456 --totp-code 654321  # Complete with TOTP
 ```
+
+Set `PWM_SAVE_TO_LIBRARY=1` to save shared CLI and MCP queries to the Perplexity thread library. Queries are incognito by default.
 
 ### Usage
 
@@ -360,7 +363,7 @@ pwm usage --refresh         # Force-refresh from server
 | `pplx_connectors`               | FREE                                    | List account connector source IDs for `source_focus`                                                                                                                                   |
 | `pplx_auth_status`              | FREE                                    | Check auth status                                                                                                                                                                      |
 | `pplx_auth_request_code`        | FREE                                    | Send verification code                                                                                                                                                                 |
-| `pplx_auth_complete`            | FREE                                    | Complete auth with code                                                                                                                                                                |
+| `pplx_auth_complete`            | FREE                                    | Complete email and optional TOTP authentication                                                                                                                                         |
 
 All query tools accept `source_focus`: `"none"`, `"web"`, `"academic"`, `"social"`, `"finance"`, `"all"`, or a connector source ID from `pplx_connectors()`.
 Use `source_focus="none"` for model-only queries without web search.
@@ -513,6 +516,7 @@ pwm login --check && pwm usage
 pwm login --email user@example.com
 # wait for email, then:
 pwm login --email user@example.com --code 123456
+# For a TOTP-enabled account, include: --totp-code 654321
 ```
 
 ## API Server
