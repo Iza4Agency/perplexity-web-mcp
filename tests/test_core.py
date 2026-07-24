@@ -467,10 +467,19 @@ class TestProcessData:
 
     def test_invalid_json_in_text_raises_response_parsing_error(self) -> None:
         conv = self._conv()
-        data = {"text": "not valid json {"}
+        data = {"text": "{invalid json syntax"}
 
         with pytest.raises(ResponseParsingError, match="Invalid JSON"):
             conv._process_data(data)
+
+    def test_plain_text_error_in_text_surfaces_actual_message(self) -> None:
+        conv = self._conv()
+        data = {"text": "Error in processing query."}
+
+        with pytest.raises(ResponseParsingError) as exc_info:
+            conv._process_data(data)
+
+        assert "Error in processing query." in str(exc_info.value)
 
     def test_unexpected_structure_raises(self) -> None:
         conv = self._conv()

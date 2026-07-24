@@ -1075,8 +1075,8 @@ async def stream_response(
 
         elif kind == "error":
             logging.error(f"Stream error: {payload}")
-            # Add recovery instructions for 403 errors
-            error_msg = payload
+            # Strip wrapper prefixes for cleaner client-facing messages
+            error_msg = payload.removeprefix("Failed to parse API response: ")
             if "403" in payload or "forbidden" in payload.lower():
                 error_msg = (
                     "Session token expired (403). "

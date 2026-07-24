@@ -4,6 +4,19 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.4] - 2026-07-23
+
+### Fixed
+
+- **SSE error message extraction** — Preserves raw Perplexity error strings (e.g. `data: {"text": "Error in processing query."}`) in `ResponseParsingError` instead of masking backend rejections behind generic JSON decoding failures. ([#17](https://github.com/jacob-bd/perplexity-web-mcp/issues/17))
+- **API stream error formatting** — Strips internal error prefixes in the Anthropic/OpenAI API compatibility server so clients receive clean, actionable error messages.
+
+### Changed
+
+- **Version bump** — Aligned package, desktop extension metadata, bundled skill, project skill, and lockfile at `0.14.4`.
+
+---
+
 ## [0.14.3] - 2026-07-21
 
 ### Added

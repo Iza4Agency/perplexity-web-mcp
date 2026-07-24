@@ -590,10 +590,12 @@ class Conversation:
         except KeyError as error:
             raise ResponseParsingError("Missing 'text' field in data", raw_data=str(data)) from error
         except JSONDecodeError as error:
-            print("ERROR DATA:", data.get("text"))
-            raise ResponseParsingError(
-                "Invalid JSON in 'text' field", raw_data=str(data.get("text", ""))[:500]
-            ) from error
+            raw_text = data.get("text", "")
+            logger.warning(f"Non-JSON text in SSE data: {raw_text[:200]}")
+            stripped = raw_text.lstrip()
+            if stripped and not stripped.startswith(("{", "[")):
+                raise ResponseParsingError(raw_text) from error
+            raise ResponseParsingError("Invalid JSON in 'text' field", raw_data=str(raw_text)[:500]) from error
 
         answer_data: dict[str, Any] = {}
 
