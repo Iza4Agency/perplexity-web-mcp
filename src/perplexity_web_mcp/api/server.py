@@ -46,7 +46,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
-from perplexity_web_mcp import ConversationConfig, Models, Perplexity
+from perplexity_web_mcp import ConversationConfig, Models, Perplexity, ResponseParsingError
 
 # Tool calling disabled for now - models don't reliably follow format instructions
 # from perplexity_web_mcp.api.tool_calling import (...)
@@ -530,6 +530,25 @@ last_request_time: float = 0.0
 MIN_REQUEST_INTERVAL: float = 5.0  # Minimum seconds between Perplexity requests (Perplexity rate limits)
 API_CONTEXT_MAX_CHARS: int = int(os.getenv("PWM_API_CONTEXT_MAX_CHARS", "60000"))
 
+# Perplexity backend error frames known to be transient (retry-worthy) rather than
+# indicative of a malformed request. Matched as a substring against the exception message.
+_RETRYABLE_BACKEND_MESSAGES: tuple[str, ...] = (
+    "error in processing query",
+    "missing 'text' field",
+)
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """Whether a query failure looks transient and worth retrying."""
+
+    error_str = str(error)
+    if "curl" in error_str.lower():
+        return True
+    if isinstance(error, ResponseParsingError):
+        lowered = error_str.lower()
+        return any(marker in lowered for marker in _RETRYABLE_BACKEND_MESSAGES)
+    return False
+
 
 # =============================================================================
 # Application
@@ -890,50 +909,60 @@ async def create_message(request: Request, body: MessagesRequest):
         )
 
     # Non-streaming response
-    try:
-        # Create fresh client for each request (with semaphore to limit concurrency)
-        async with perplexity_semaphore:
-            global last_request_time
-            import time as time_module
+    global last_request_time
+    import time as time_module
 
-            # Rate limiting: ensure minimum interval between requests
-            now = time_module.time()
-            wait_needed = MIN_REQUEST_INTERVAL - (now - last_request_time)
-            if wait_needed > 0:
-                logging.debug(f"Rate limiting: waiting {wait_needed:.1f}s")
-                await asyncio.sleep(wait_needed)
-            last_request_time = time_module.time()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Create fresh client for each request (with semaphore to limit concurrency)
+            async with perplexity_semaphore:
+                # Rate limiting: ensure minimum interval between requests
+                now = time_module.time()
+                wait_needed = MIN_REQUEST_INTERVAL - (now - last_request_time)
+                if wait_needed > 0:
+                    logging.debug(f"Rate limiting: waiting {wait_needed:.1f}s")
+                    await asyncio.sleep(wait_needed)
+                last_request_time = time_module.time()
 
-            fresh_client = Perplexity(session_token=config.session_token)
-            conversation = fresh_client.create_conversation(
-                ConversationConfig(model=model, citation_mode=CitationMode.DEFAULT)
-            )
-            # Single ask with prepended system context
-            await asyncio.to_thread(conversation.ask, full_query, init_query=query)
-            fresh_client.close()
-        answer = conversation.answer or ""
+                fresh_client = Perplexity(session_token=config.session_token)
+                conversation = fresh_client.create_conversation(
+                    ConversationConfig(model=model, citation_mode=CitationMode.DEFAULT)
+                )
+                # Single ask with prepended system context
+                await asyncio.to_thread(conversation.ask, full_query, init_query=query)
+                fresh_client.close()
+            answer = conversation.answer or ""
 
-        # Append citations if available
-        citations = format_citations(conversation.search_results)
-        full_response = answer + citations
+            # Append citations if available
+            citations = format_citations(conversation.search_results)
+            full_response = answer + citations
 
-        return {
-            "id": response_id,
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": full_response}],
-            "model": body.model,
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": estimate_tokens(full_response),
-            },
-        }
+            return {
+                "id": response_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": full_response}],
+                "model": body.model,
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": estimate_tokens(full_response),
+                },
+            }
 
-    except Exception as e:
-        logging.error(f"Error creating message: {e}")
-        raise HTTPException(status_code=500, detail={"type": "api_error", "message": str(e)})
+        except Exception as e:  # noqa: PERF203 -- retry loop is network-bound, max 3 iterations
+            last_request_time = time_module.time()  # Update even on error
+            if _is_retryable_error(e) and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2
+                logging.warning(
+                    f"Retryable error (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s"
+                )
+                await asyncio.sleep(wait_time)
+                continue
+            logging.error(f"Error creating message: {e}")
+            raise HTTPException(status_code=500, detail={"type": "api_error", "message": str(e)})
 
 
 async def stream_response(
@@ -1038,9 +1067,12 @@ async def stream_response(
             except Exception as e:
                 error_str = str(e)
                 last_request_time = time_module.time()  # Update even on error
-                if "curl" in error_str.lower() and attempt < max_retries - 1:
+                if _is_retryable_error(e) and attempt < max_retries - 1:
                     wait_time = (attempt + 1) * 2
-                    logging.warning(f"Curl error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s")
+                    logging.warning(
+                        f"Retryable error (attempt {attempt + 1}/{max_retries}): {error_str}. "
+                        f"Retrying in {wait_time}s"
+                    )
                     time_module.sleep(wait_time)
                     last = ""
                     continue
