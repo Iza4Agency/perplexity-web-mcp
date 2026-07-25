@@ -4,6 +4,18 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.5] - 2026-07-25
+
+### Fixed
+
+- **API server retries** — The Anthropic-compatible `/v1/messages` endpoint now retries transient Perplexity backend error frames (e.g. `Error in processing query.`) instead of failing the request immediately; the non-streaming path previously had no retry at all. ([#17](https://github.com/jacob-bd/perplexity-web-mcp/issues/17))
+
+### Changed
+
+- **Version bump** — Aligned package, desktop extension metadata, bundled skill, project skill, and lockfile at `0.14.5`.
+
+---
+
 ## [0.14.4] - 2026-07-23
 
 ### Fixed
