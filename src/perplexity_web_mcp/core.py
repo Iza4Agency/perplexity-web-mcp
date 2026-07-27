@@ -35,10 +35,12 @@ from .http import HTTPClient
 from .limits import MAX_FILE_SIZE, MAX_FILES
 from .logging import configure_logging, get_logger
 from .models import Model, Models
+from .trace import log_trace
 from .types import Response, SearchResultItem, ThreadDetail, ThreadListEntry, ThreadTurn, _FileInfo
 
 
 logger = get_logger(__name__)
+
 
 
 class Perplexity:
@@ -353,12 +355,18 @@ class Conversation:
         payload = self._build_payload(query, model, file_urls)
         # Use truncated query for init_search to avoid URL length limits
         search_query = init_query if init_query is not None else query[:500]
+        log_trace(f"[STAGE 3 - PERPLEXITY INIT SEARCH] search_query={search_query!r}")
         self._http.init_search(search_query)
 
+        log_trace(
+            f"[STAGE 3 - PERPLEXITY SSE POST] model={model.identifier} mode={model.mode} "
+            f"query_str_len={len(query)}"
+        )
         if stream:
             self._stream_generator = self._stream(payload)
         else:
             self._complete(payload)
+
 
     def _reset_response_state(self) -> None:
         self._title = None
@@ -559,6 +567,9 @@ class Conversation:
         return CITATION_PATTERN.sub(replacer, text)
 
     def _parse_line(self, line: str | bytes) -> dict[str, Any] | None:
+        raw_str = line.decode("utf-8", errors="replace") if isinstance(line, bytes) else str(line)
+        log_trace(f"[STAGE 3 - RAW SSE LINE] {raw_str.strip()[:400]}")
+
         try:
             if isinstance(line, bytes) and line.startswith(b"data: "):
                 return loads(line[6:])
@@ -566,9 +577,11 @@ class Conversation:
                 return loads(line[6:])
         except (JSONDecodeError, UnicodeDecodeError) as error:
             logger.debug(f"Skipping malformed SSE line: {error}")
+            log_trace(f"[STAGE 3 - SSE LINE DECODE ERROR] {error}")
             return None
 
         return None
+
 
     def _process_data(self, data: dict[str, Any]) -> None:
         """Process SSE data chunk and update conversation state."""

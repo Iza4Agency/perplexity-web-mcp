@@ -4,7 +4,20 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.6] - 2026-07-26
+
+### Added
+
+- **Diagnostic Trace Mode (`--trace`)** — Added full 4-stage request/response diagnostic tracing for `pwm api --trace` and `pwm hack claude --trace`. Logs un-truncated payloads (system prompts, prompt context transformations, raw Perplexity SSE lines, and client response deltas) to `~/.config/perplexity-web-mcp/logs/api-trace.log` with automatic credential redaction to help pinpoint API integration failures. ([#17](https://github.com/jacob-bd/perplexity-web-mcp/issues/17))
+
+### Changed
+
+- **Version bump** — Aligned package, desktop extension metadata, bundled skill, project skill, and lockfile at `0.14.6`.
+
+---
+
 ## [0.14.5] - 2026-07-25
+
 
 ### Fixed
 

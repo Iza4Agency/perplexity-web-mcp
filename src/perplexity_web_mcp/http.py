@@ -13,6 +13,8 @@ from .exceptions import AuthenticationError, HTTPError, PerplexityError, RateLim
 from .limits import DEFAULT_TIMEOUT
 from .logging import get_logger, log_request, log_response, log_retry
 from .resilience import RateLimiter, RetryConfig, create_retry_decorator, get_random_browser_profile
+from .trace import log_trace
+
 
 
 if TYPE_CHECKING:
@@ -255,8 +257,10 @@ class HTTPClient:
             )
             elapsed_ms = (monotonic() - request_start) * 1000
             log_response("GET", url, response.status_code, elapsed_ms=elapsed_ms)
+            log_trace(f"[STAGE 3 - HTTP GET /search/new] status={response.status_code} elapsed_ms={elapsed_ms:.1f}")
 
             response_body = None
+
             try:
                 response_body = response.text if hasattr(response, "text") else None
             except Exception:

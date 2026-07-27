@@ -47,8 +47,10 @@ from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
 from perplexity_web_mcp import ConversationConfig, Models, Perplexity, ResponseParsingError
+from perplexity_web_mcp.trace import log_trace
 
 # Tool calling disabled for now - models don't reliably follow format instructions
+
 # from perplexity_web_mcp.api.tool_calling import (...)
 from perplexity_web_mcp.api.session_manager import ConversationManager
 from perplexity_web_mcp.enums import CitationMode
@@ -897,6 +899,21 @@ async def create_message(request: Request, body: MessagesRequest):
 
     logging.info(f"Request: model={body.model}, thinking={thinking_enabled}, stream={body.stream}")
 
+    log_trace(
+        f"[STAGE 1 - INBOUND REQUEST] model={body.model} thinking={thinking_enabled} "
+        f"stream={body.stream} system_len={len(system_text or '')} "
+        f"messages_count={len(body.messages)} tools_count={len(body.tools or [])}"
+    )
+    if system_text:
+        log_trace(f"[STAGE 1 - SYSTEM PROMPT]\n{system_text}")
+
+    log_trace(
+        f"[STAGE 2 - TRANSFORMED QUERY] target_model={model.identifier} mode={model.mode} "
+        f"init_query={query!r} full_query_len={len(full_query)}"
+    )
+    log_trace(f"[STAGE 2 - FULL QUERY BODY]\n{full_query}")
+
+
     if body.stream:
         return StreamingResponse(
             stream_response(response_id, body.model, model, full_query, input_tokens, init_query=query),
@@ -1107,6 +1124,7 @@ async def stream_response(
 
         elif kind == "error":
             logging.error(f"Stream error: {payload}")
+            log_trace(f"[STAGE 4 - STREAM ERROR] {payload}")
             # Strip wrapper prefixes for cleaner client-facing messages
             error_msg = payload.removeprefix("Failed to parse API response: ")
             if "403" in payload or "forbidden" in payload.lower():
@@ -1121,6 +1139,7 @@ async def stream_response(
             }
             yield f"event: content_block_delta\ndata: {json.dumps(error_delta)}\n\n"
             break
+
         else:  # done - payload is (answer, citations)
             total_output, citations_text = payload
             break
