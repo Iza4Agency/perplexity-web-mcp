@@ -161,11 +161,11 @@ class TestResolveModel:
     """Test resolve_model with various inputs."""
 
     def test_auto_returns_best(self) -> None:
-        assert resolve_model("auto") is Models.BEST
+        assert resolve_model("auto") is Models.AUTO
 
     def test_auto_thinking_still_returns_best(self) -> None:
         # auto has no thinking variant (None)
-        assert resolve_model("auto", thinking=True) is Models.BEST
+        assert resolve_model("auto", thinking=True) is Models.AUTO
 
     def test_nemotron_base(self) -> None:
         assert resolve_model("nemotron") is Models.NEMOTRON_3_ULTRA

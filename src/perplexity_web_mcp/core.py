@@ -30,7 +30,13 @@ from .constants import (
     USE_SCHEMATIZED_API,
 )
 from .enums import CitationMode, SourceFocus
-from .exceptions import FileUploadError, FileValidationError, ResearchClarifyingQuestionsError, ResponseParsingError
+from .exceptions import (
+    FileUploadError,
+    FileValidationError,
+    RateLimitError,
+    ResearchClarifyingQuestionsError,
+    ResponseParsingError,
+)
 from .http import HTTPClient
 from .limits import MAX_FILE_SIZE, MAX_FILES
 from .logging import configure_logging, get_logger
@@ -585,6 +591,10 @@ class Conversation:
 
     def _process_data(self, data: dict[str, Any]) -> None:
         """Process SSE data chunk and update conversation state."""
+        if data.get("error_code") == "FREE_TIER_RATE_LIMITED":
+            raise RateLimitError(
+                "Perplexity Free Tier rate limit reached. Please wait for your daily quota to reset or upgrade to Pro."
+            )
 
         if "backend_uuid" in data:
             self._backend_uuid = data["backend_uuid"]

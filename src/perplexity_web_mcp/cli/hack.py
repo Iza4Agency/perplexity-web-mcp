@@ -70,6 +70,18 @@ def _hack_claude(args: list[str]) -> int:
             print(f"  {model['id']:<20} {model['description']}")
         return 0
 
+    print(
+        "\033[33m⚠️  DEPRECATION WARNING: `pwm hack claude` is deprecated and will be removed in a future release.\033[0m\n"
+        "   Proxying Claude Code via Perplexity web scraper is unreliable due to Rate Limits and prompt overhead.\n"
+        "   Please use `pwm ask`, `pwm chat`, or `pwm-mcp` instead.\n",
+        file=sys.stderr,
+    )
+    if sys.stdin.isatty():
+        try:
+            input("Press Enter to continue...")
+        except (KeyboardInterrupt, EOFError):
+            return 0
+
     # 1. Verify claude is installed
     claude_path = shutil.which("claude")
     if not claude_path:
@@ -156,9 +168,9 @@ def _hack_claude(args: list[str]) -> int:
         return result.returncode
 
     finally:
-        # 7. Clean up the API server
+        # 8. Clean up the API server
         if server_process.poll() is None:
-            print("\nShutting down local API server...", file=sys.stderr)
+            print("Shutting down local API server...", file=sys.stderr)
             server_process.terminate()
             try:
                 server_process.wait(timeout=5)

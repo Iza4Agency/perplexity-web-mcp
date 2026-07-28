@@ -1173,7 +1173,7 @@ wheels = [
 
 [[package]]
 name = "perplexity-web-mcp-cli"
-version = "0.14.6"
+version = "0.14.7"
 source = { editable = "." }
 dependencies = [
     { name = "curl-cffi" },

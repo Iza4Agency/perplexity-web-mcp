@@ -4,6 +4,19 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.7] - 2026-07-28
+
+### Added
+
+- **`FREE_TIER_RATE_LIMITED` Error Detection** — Added explicit error handling in core client when Perplexity's web backend returns `FREE_TIER_RATE_LIMITED` SSE frames, providing a clear user message instead of a generic blank response.
+- **`Models.AUTO` Model Definition** — Added `Models.AUTO` (`identifier="auto"`, `mode="concise"`) to support standard free search routing.
+
+### Deprecated
+
+- **`pwm hack claude` Command Deprecation** — Deprecated `pwm hack claude` CLI command due to web scraper rate limit constraints and proprietary prompt overhead. Added an interactive pre-launch deprecation prompt.
+
+---
+
 ## [0.14.6] - 2026-07-26
 
 ### Added

@@ -15,7 +15,12 @@ import pytest
 from perplexity_web_mcp.config import ClientConfig, ConversationConfig
 from perplexity_web_mcp.core import Conversation, Perplexity
 from perplexity_web_mcp.enums import CitationMode, SearchFocus, SourceFocus, TimeRange
-from perplexity_web_mcp.exceptions import FileValidationError, ResearchClarifyingQuestionsError, ResponseParsingError
+from perplexity_web_mcp.exceptions import (
+    FileValidationError,
+    RateLimitError,
+    ResearchClarifyingQuestionsError,
+    ResponseParsingError,
+)
 from perplexity_web_mcp.models import Models
 from perplexity_web_mcp.types import Response, SearchResultItem
 
@@ -452,6 +457,13 @@ class TestProcessData:
             conv._process_data(data)
 
         assert exc_info.value.questions == ["Q1?", "Q2?"]
+
+    def test_free_tier_rate_limited_raises_rate_limit_error(self) -> None:
+        conv = self._conv()
+        data = {"error_code": "FREE_TIER_RATE_LIMITED", "status": "failed"}
+
+        with pytest.raises(RateLimitError, match="Free Tier rate limit reached"):
+            conv._process_data(data)
 
     def test_missing_text_raises_response_parsing_error(self) -> None:
         conv = self._conv()

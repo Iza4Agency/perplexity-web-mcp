@@ -75,7 +75,7 @@ class SourceResolutionError(ValueError):
 
 
 MODEL_METADATA: dict[str, ModelDefinition] = {
-    "auto": ModelDefinition(Models.BEST, None, "Auto (Best)", "Perplexity", council_eligible=False),
+    "auto": ModelDefinition(Models.AUTO, None, "Auto (Concise)", "Perplexity", council_eligible=False),
     "sonar": ModelDefinition(Models.SONAR, None, "Sonar 2", "Perplexity"),
     "deep_research": ModelDefinition(
         Models.DEEP_RESEARCH,
