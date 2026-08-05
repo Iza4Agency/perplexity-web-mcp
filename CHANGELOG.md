@@ -4,6 +4,12 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.8] - 2026-08-05
+
+### Fixed
+
+- **Schematized streaming responses** — Added support for Perplexity's blocks-only SSE response format, including `ask_text` and `web_results` blocks, preventing `Missing 'text' field` errors. ([#19](https://github.com/jacob-bd/perplexity-web-mcp/issues/19))
+
 ## [0.14.7] - 2026-07-28
 
 ### Added

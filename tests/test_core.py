@@ -465,17 +465,43 @@ class TestProcessData:
         with pytest.raises(RateLimitError, match="Free Tier rate limit reached"):
             conv._process_data(data)
 
-    def test_missing_text_raises_response_parsing_error(self) -> None:
+    def test_blocks_only_frames_update_state(self) -> None:
         conv = self._conv()
-        data = {
-            "backend_uuid": "x"
-        }  # No text, but we return early - actually no, we return early only if BOTH text and blocks missing
-        # When "text" not in data and "blocks" not in data, we return early. So we never reach the loads.
-        # So missing text with some other field that makes us NOT return early - we need "text" or "blocks".
-        # If we have neither, we return. So the KeyError happens when we have "blocks" but not "text" - then loads(data["text"]) KeyErrors.
-        data = {"blocks": "something"}  # has blocks, no text - so we don't return early, then KeyError on data["text"]
-        with pytest.raises(ResponseParsingError):
-            conv._process_data(data)
+        conv._process_data({"status": "PENDING", "blocks": []})
+        assert conv._answer is None
+        assert conv._search_results == []
+
+        conv._process_data(
+            {
+                "thread_title": "Blocks response",
+                "status": "COMPLETED",
+                "final": True,
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {
+                            "progress": "DONE",
+                            "answer": "Answer [1]",
+                            "chunks": ["Answer [1]"],
+                        },
+                    },
+                    {
+                        "intended_usage": "web_results",
+                        "web_result_block": {
+                            "progress": "DONE",
+                            "web_results": [{"name": "Source", "url": "https://example.com", "snippet": "Snippet"}],
+                        },
+                    },
+                ],
+            }
+        )
+
+        assert conv._title == "Blocks response"
+        assert conv._answer == "Answer [1]"
+        assert conv._chunks == ["Answer [1]"]
+        assert len(conv._search_results) == 1
+        assert conv._search_results[0].title == "Source"
+        assert conv._search_results[0].url == "https://example.com"
 
     def test_invalid_json_in_text_raises_response_parsing_error(self) -> None:
         conv = self._conv()

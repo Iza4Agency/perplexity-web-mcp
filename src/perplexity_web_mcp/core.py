@@ -48,6 +48,38 @@ from .types import Response, SearchResultItem, ThreadDetail, ThreadListEntry, Th
 logger = get_logger(__name__)
 
 
+def _blocks_to_answer_data(blocks: Any) -> dict[str, Any]:
+    answer_data: dict[str, Any] = {}
+
+    for block in blocks or []:
+        if not isinstance(block, dict):
+            continue
+
+        usage = block.get("intended_usage")
+        if usage == "ask_text":
+            markdown = block.get("markdown_block")
+            if not isinstance(markdown, dict):
+                continue
+
+            answer = markdown.get("answer")
+            if answer is not None:
+                answer_data["answer"] = str(answer)
+
+            chunks = markdown.get("chunks")
+            if isinstance(chunks, list) and chunks:
+                answer_data["chunks"] = chunks
+
+        elif usage == "web_results":
+            web_result = block.get("web_result_block")
+            if not isinstance(web_result, dict):
+                continue
+
+            results = web_result.get("web_results")
+            if isinstance(results, list) and results:
+                answer_data["web_results"] = results
+
+    return answer_data
+
 
 class Perplexity:
     """Web scraper for Perplexity AI conversations."""
@@ -365,14 +397,12 @@ class Conversation:
         self._http.init_search(search_query)
 
         log_trace(
-            f"[STAGE 3 - PERPLEXITY SSE POST] model={model.identifier} mode={model.mode} "
-            f"query_str_len={len(query)}"
+            f"[STAGE 3 - PERPLEXITY SSE POST] model={model.identifier} mode={model.mode} query_str_len={len(query)}"
         )
         if stream:
             self._stream_generator = self._stream(payload)
         else:
             self._complete(payload)
-
 
     def _reset_response_state(self) -> None:
         self._title = None
@@ -588,7 +618,6 @@ class Conversation:
 
         return None
 
-
     def _process_data(self, data: dict[str, Any]) -> None:
         """Process SSE data chunk and update conversation state."""
         if data.get("error_code") == "FREE_TIER_RATE_LIMITED":
@@ -605,7 +634,10 @@ class Conversation:
         if data.get("thread_title"):
             self._title = data["thread_title"]
 
-        if "text" not in data and "blocks" not in data:
+        if "text" not in data:
+            answer_data = _blocks_to_answer_data(data.get("blocks"))
+            if answer_data:
+                self._update_state(data.get("thread_title"), answer_data)
             return None
 
         try:

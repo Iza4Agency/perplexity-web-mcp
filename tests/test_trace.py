@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from perplexity_web_mcp.trace import (
     get_trace_log_path,
     is_trace_enabled,
@@ -42,7 +40,7 @@ def test_reset_and_log_trace(monkeypatch, tmp_path):
     assert trace_path.exists()
 
     log_trace("Sample trace event")
-    with open(trace_path, encoding="utf-8") as f:
+    with trace_path.open(encoding="utf-8") as f:
         content = f.read()
 
     assert "Sample trace event" in content

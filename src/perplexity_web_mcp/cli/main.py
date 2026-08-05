@@ -813,7 +813,11 @@ def _cmd_connectors_list(refresh: bool = False) -> int:
 @click.option("-p", "--port", default=8080, type=int, help="Port number.")
 @click.option("--model", "default_model", default="auto", help="Default model.")
 @click.option("--log-level", default="info", help="Log level: debug, info, warning, error.")
-@click.option("--trace", is_flag=True, help="Enable trace mode (logs un-truncated payloads to ~/.config/perplexity-web-mcp/logs/api-trace.log).")
+@click.option(
+    "--trace",
+    is_flag=True,
+    help="Enable trace mode (logs un-truncated payloads to ~/.config/perplexity-web-mcp/logs/api-trace.log).",
+)
 def api(host, port, default_model, log_level, trace):
     """Start the Anthropic/OpenAI API-compatible server.
 
@@ -832,13 +836,13 @@ def api(host, port, default_model, log_level, trace):
     if trace:
         os.environ["PWM_TRACE"] = "1"
         from perplexity_web_mcp.trace import get_trace_log_path, reset_trace_log
+
         reset_trace_log()
         print(f"Trace mode enabled! Logging to {get_trace_log_path()}", file=sys.stderr)
 
     from perplexity_web_mcp.api import run_server
 
     run_server()
-
 
 
 # ── Hack ───────────────────────────────────────────────────────────────────

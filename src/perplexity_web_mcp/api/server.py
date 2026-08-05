@@ -47,15 +47,14 @@ from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
 from perplexity_web_mcp import ConversationConfig, Models, Perplexity, ResponseParsingError
-from perplexity_web_mcp.trace import log_trace
 
 # Tool calling disabled for now - models don't reliably follow format instructions
-
 # from perplexity_web_mcp.api.tool_calling import (...)
 from perplexity_web_mcp.api.session_manager import ConversationManager
 from perplexity_web_mcp.enums import CitationMode
 from perplexity_web_mcp.models import Model
 from perplexity_web_mcp.token_store import load_token
+from perplexity_web_mcp.trace import log_trace
 
 
 # Supported Anthropic API version
@@ -913,7 +912,6 @@ async def create_message(request: Request, body: MessagesRequest):
     )
     log_trace(f"[STAGE 2 - FULL QUERY BODY]\n{full_query}")
 
-
     if body.stream:
         return StreamingResponse(
             stream_response(response_id, body.model, model, full_query, input_tokens, init_query=query),
@@ -973,9 +971,7 @@ async def create_message(request: Request, body: MessagesRequest):
             last_request_time = time_module.time()  # Update even on error
             if _is_retryable_error(e) and attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 2
-                logging.warning(
-                    f"Retryable error (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s"
-                )
+                logging.warning(f"Retryable error (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s")
                 await asyncio.sleep(wait_time)
                 continue
             logging.error(f"Error creating message: {e}")
@@ -1087,8 +1083,7 @@ async def stream_response(
                 if _is_retryable_error(e) and attempt < max_retries - 1:
                     wait_time = (attempt + 1) * 2
                     logging.warning(
-                        f"Retryable error (attempt {attempt + 1}/{max_retries}): {error_str}. "
-                        f"Retrying in {wait_time}s"
+                        f"Retryable error (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s"
                     )
                     time_module.sleep(wait_time)
                     last = ""

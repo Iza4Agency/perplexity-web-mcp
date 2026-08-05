@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 
+
 CONFIG_DIR = Path.home() / ".config" / "perplexity-web-mcp"
 LOGS_DIR = CONFIG_DIR / "logs"
 TRACE_LOG_FILE = LOGS_DIR / "api-trace.log"
@@ -22,17 +23,19 @@ ENV_TRACE_KEY = "PWM_TRACE"
 REDACTION_PATTERNS = [
     # Authorization / Bearer tokens
     (re.compile(r"Bearer\s+[A-Za-z0-9._\-+/=]+", re.IGNORECASE), "Bearer [REDACTED]"),
-    (re.compile(r'("authorization"\s*:\s*")[^"]+', re.IGNORECASE), r'\1[REDACTED]'),
-    (re.compile(r'(x-api-key"\s*:\s*")[^"]+', re.IGNORECASE), r'\1[REDACTED]'),
+    (re.compile(r'("authorization"\s*:\s*")[^"]+', re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r'(x-api-key"\s*:\s*")[^"]+', re.IGNORECASE), r"\1[REDACTED]"),
     # Session tokens / Cookies
-    (re.compile(r'(session-token"\s*:\s*")[^"]+', re.IGNORECASE), r'\1[REDACTED]'),
-    (re.compile(r'(session_token"\s*:\s*")[^"]+', re.IGNORECASE), r'\1[REDACTED]'),
-    (re.compile(r"__secure-next-auth\.session-token=[^;\s]+", re.IGNORECASE), "__secure-next-auth.session-token=[REDACTED]"),
+    (re.compile(r'(session-token"\s*:\s*")[^"]+', re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r'(session_token"\s*:\s*")[^"]+', re.IGNORECASE), r"\1[REDACTED]"),
+    (
+        re.compile(r"__secure-next-auth\.session-token=[^;\s]+", re.IGNORECASE),
+        "__secure-next-auth.session-token=[REDACTED]",
+    ),
     # General API key prefixes
     (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{8,}\b"), "sk-ant-[REDACTED]"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"), "sk-[REDACTED]"),
     (re.compile(r"\bAIza[A-Za-z0-9_-]{20,}\b"), "AIza[REDACTED]"),
-
 ]
 
 

@@ -97,6 +97,7 @@ def _hack_claude(args: list[str]) -> int:
     trace_enabled = "--trace" in args or os.getenv("PWM_TRACE") == "1"
     if trace_enabled:
         from perplexity_web_mcp.trace import get_trace_log_path, reset_trace_log
+
         reset_trace_log()
         print(f"Trace mode enabled! Logs will be saved to {get_trace_log_path()}", file=sys.stderr)
 
@@ -119,7 +120,6 @@ def _hack_claude(args: list[str]) -> int:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-
 
     try:
         # 3. Wait for API Server to be ready
@@ -147,7 +147,6 @@ def _hack_claude(args: list[str]) -> int:
             claude_args[idx] = "--model"
         if "--model" not in claude_args:
             claude_args.extend(["--model", "perplexity-auto"])
-
 
         # 6. Guard Claude's settings.json against /model corruption.
         #    Claude Code persists /model selections (e.g. "gpt56_terra") to

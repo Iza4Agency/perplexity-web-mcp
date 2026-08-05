@@ -16,7 +16,6 @@ from .resilience import RateLimiter, RetryConfig, create_retry_decorator, get_ra
 from .trace import log_trace
 
 
-
 if TYPE_CHECKING:
     from collections.abc import Generator
 
