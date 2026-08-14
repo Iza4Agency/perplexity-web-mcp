@@ -736,7 +736,9 @@ class Conversation:
         chunks = answer_data.get("chunks", [])
         if chunks:
             formatted = [self._format_citations(chunk) for chunk in chunks if chunk is not None]
-            self._chunks = [c for c in formatted if c is not None]
+            self._chunks.extend(c for c in formatted if c is not None)
+            if answer_text is None:
+                self._answer = "".join(self._chunks)
 
         self._raw_data = answer_data
 

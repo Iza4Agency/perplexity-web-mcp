@@ -132,6 +132,15 @@ pwm doctor
 
 This verifies your installation, authentication, MCP config, skill status, rate limits, and token security.
 
+### Blank or Truncated Answers
+
+Perplexity can return answer chunks without the older `text` field. If `pwm ask` returns `No answer received` or only part of the answer, upgrade the CLI:
+
+```bash
+uv tool upgrade perplexity-web-mcp-cli
+pwm --version
+```
+
 ## Available Models
 
 | Name             | Provider   | Thinking  | Tier          |

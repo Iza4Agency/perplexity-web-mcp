@@ -503,6 +503,54 @@ class TestProcessData:
         assert conv._search_results[0].title == "Source"
         assert conv._search_results[0].url == "https://example.com"
 
+    def test_blocks_only_chunks_reconstruct_answer(self) -> None:
+        conv = self._conv()
+        conv._process_data(
+            {
+                "status": "COMPLETED",
+                "final": True,
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {
+                            "progress": "DONE",
+                            "chunks": ["Answer", " text"],
+                        },
+                    },
+                ],
+            }
+        )
+
+        assert conv.answer == "Answer text"
+        assert conv._chunks == ["Answer", " text"]
+
+    def test_blocks_only_chunks_accumulate_across_frames(self) -> None:
+        conv = self._conv()
+        conv._process_data(
+            {
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {"chunks": ["Answer"]},
+                    },
+                ],
+            }
+        )
+        conv._process_data(
+            {
+                "final": True,
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {"chunks": [" text"]},
+                    },
+                ],
+            }
+        )
+
+        assert conv.answer == "Answer text"
+        assert conv._chunks == ["Answer", " text"]
+
     def test_invalid_json_in_text_raises_response_parsing_error(self) -> None:
         conv = self._conv()
         data = {"text": "{invalid json syntax"}

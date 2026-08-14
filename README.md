@@ -556,6 +556,15 @@ pwm login --email your@email.com --code 123456
 If the tool returns `TOTP_REQUIRED`, call it again with
 `pplx_auth_complete(email="your@email.com", totp_code="654321")`.
 
+### Blank or Truncated Answers
+
+Perplexity can return answer chunks without the older `text` field. If `pwm ask` returns `No answer received` or only part of the answer, upgrade to the latest patch release:
+
+```bash
+uv tool upgrade perplexity-web-mcp-cli
+pwm --version
+```
+
 ### Diagnose Issues
 
 ```bash

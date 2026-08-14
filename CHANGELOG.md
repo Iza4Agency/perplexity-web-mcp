@@ -4,6 +4,12 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
+## [0.14.9] - 2026-08-14
+
+### Fixed
+
+- **Blocks-only SSE answer assembly** — Reconstructs complete answers from incremental `ask_text` chunks when Perplexity omits the `text` and `answer` fields, preventing blank or truncated responses. ([#21](https://github.com/jacob-bd/perplexity-web-mcp/issues/21))
+
 ## [0.14.8] - 2026-08-05
 
 ### Fixed
