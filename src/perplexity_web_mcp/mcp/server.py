@@ -7,11 +7,15 @@ the MCP tool wrappers and auth tools (which are MCP-specific).
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import threading
 from time import monotonic
 import uuid
+import weakref
 
 from fastmcp import FastMCP
+from loguru import logger
 
 from perplexity_web_mcp.models import Models
 from perplexity_web_mcp.shared import (
@@ -62,6 +66,47 @@ mcp = FastMCP(
         "3. pplx_auth_complete — complete auth with the 6-digit code"
     ),
 )
+
+
+# FastMCP 2.14 starts a Prefect Docket worker for MCP background tasks from
+# _docket_lifespan, unconditionally, for every transport including stdio. On the default
+# memory:// backend that worker polls a fakeredis instance inside THIS process on two
+# 250 ms timers (docket/worker.py:172-173), so 8 Hz forever, and the scheduler half runs
+# a Lua script through lupa on every tick. Measured at ~61 idle wakeups/sec and ~1.2% of
+# a core per instance; an MCP client starts one instance per session, so it multiplies.
+#
+# It can never do anything for us: every tool below is a plain `def`, and FastMCP marks
+# sync tools task_config.mode == "forbidden", so nothing is ever registered on the
+# queue. The worker polls an empty queue for the life of the process. There is no
+# env-var kill switch - FASTMCP_DOCKET_ settings expose no "enabled" flag - so the only
+# place to disable it is here.
+#
+# Upstream: PrefectHQ/fastmcp#2887 (high idle CPU on >= 2.14.0, near-zero on 2.13.3).
+# pydocket 0.16.6 already turned an outright busy-loop into that 250 ms poll; this is
+# the residual.
+#
+# The replacement must still publish _current_server, which the real lifespan sets at
+# fastmcp/server/server.py:397 and resets at :490 - CurrentFastMCP() outside a request
+# reads it. Verified against fastmcp 2.14.4.
+@asynccontextmanager
+async def _docket_lifespan_disabled(self: FastMCP) -> AsyncIterator[None]:
+    """Stand-in for FastMCP._docket_lifespan that starts no Docket worker."""
+    from fastmcp.server.dependencies import _current_server
+
+    server_token = _current_server.set(weakref.ref(self))
+    try:
+        yield
+    finally:
+        _current_server.reset(server_token)
+
+
+if hasattr(FastMCP, "_docket_lifespan"):
+    FastMCP._docket_lifespan = _docket_lifespan_disabled  # type: ignore[method-assign]
+else:  # pragma: no cover - fastmcp renamed or dropped the hook
+    logger.warning(
+        "FastMCP._docket_lifespan is gone; the background-task worker patch is inert. "
+        "Re-check idle CPU (see PrefectHQ/fastmcp#2887) and remove this patch if fixed."
+    )
 
 
 # =============================================================================
