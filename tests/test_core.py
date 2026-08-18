@@ -15,7 +15,12 @@ import pytest
 from perplexity_web_mcp.config import ClientConfig, ConversationConfig
 from perplexity_web_mcp.core import Conversation, Perplexity
 from perplexity_web_mcp.enums import CitationMode, SearchFocus, SourceFocus, TimeRange
-from perplexity_web_mcp.exceptions import FileValidationError, ResearchClarifyingQuestionsError, ResponseParsingError
+from perplexity_web_mcp.exceptions import (
+    FileValidationError,
+    RateLimitError,
+    ResearchClarifyingQuestionsError,
+    ResponseParsingError,
+)
 from perplexity_web_mcp.models import Models
 from perplexity_web_mcp.types import Response, SearchResultItem
 
@@ -217,8 +222,14 @@ class TestBuildPayload:
 
         assert payload["params"]["sources"] == ["web", "scholar"]
 
-    def test_followup_includes_uuid_and_token(self) -> None:
+    def test_source_focus_accepts_connector_string(self) -> None:
+        config = ConversationConfig(source_focus=["pitchbook_mcp_cashmere"])
+        conv = self._conv(config)
+        payload = conv._build_payload("q", Models.BEST, [])
 
+        assert payload["params"]["sources"] == ["pitchbook_mcp_cashmere"]
+
+    def test_followup_includes_uuid_and_token(self) -> None:
         conv = self._conv()
         conv._backend_uuid = "uuid-123"
         conv._read_write_token = "token-456"
@@ -447,24 +458,114 @@ class TestProcessData:
 
         assert exc_info.value.questions == ["Q1?", "Q2?"]
 
-    def test_missing_text_raises_response_parsing_error(self) -> None:
+    def test_free_tier_rate_limited_raises_rate_limit_error(self) -> None:
         conv = self._conv()
-        data = {
-            "backend_uuid": "x"
-        }  # No text, but we return early - actually no, we return early only if BOTH text and blocks missing
-        # When "text" not in data and "blocks" not in data, we return early. So we never reach the loads.
-        # So missing text with some other field that makes us NOT return early - we need "text" or "blocks".
-        # If we have neither, we return. So the KeyError happens when we have "blocks" but not "text" - then loads(data["text"]) KeyErrors.
-        data = {"blocks": "something"}  # has blocks, no text - so we don't return early, then KeyError on data["text"]
-        with pytest.raises(ResponseParsingError):
+        data = {"error_code": "FREE_TIER_RATE_LIMITED", "status": "failed"}
+
+        with pytest.raises(RateLimitError, match="Free Tier rate limit reached"):
             conv._process_data(data)
+
+    def test_blocks_only_frames_update_state(self) -> None:
+        conv = self._conv()
+        conv._process_data({"status": "PENDING", "blocks": []})
+        assert conv._answer is None
+        assert conv._search_results == []
+
+        conv._process_data(
+            {
+                "thread_title": "Blocks response",
+                "status": "COMPLETED",
+                "final": True,
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {
+                            "progress": "DONE",
+                            "answer": "Answer [1]",
+                            "chunks": ["Answer [1]"],
+                        },
+                    },
+                    {
+                        "intended_usage": "web_results",
+                        "web_result_block": {
+                            "progress": "DONE",
+                            "web_results": [{"name": "Source", "url": "https://example.com", "snippet": "Snippet"}],
+                        },
+                    },
+                ],
+            }
+        )
+
+        assert conv._title == "Blocks response"
+        assert conv._answer == "Answer [1]"
+        assert conv._chunks == ["Answer [1]"]
+        assert len(conv._search_results) == 1
+        assert conv._search_results[0].title == "Source"
+        assert conv._search_results[0].url == "https://example.com"
+
+    def test_blocks_only_chunks_reconstruct_answer(self) -> None:
+        conv = self._conv()
+        conv._process_data(
+            {
+                "status": "COMPLETED",
+                "final": True,
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {
+                            "progress": "DONE",
+                            "chunks": ["Answer", " text"],
+                        },
+                    },
+                ],
+            }
+        )
+
+        assert conv.answer == "Answer text"
+        assert conv._chunks == ["Answer", " text"]
+
+    def test_blocks_only_chunks_accumulate_across_frames(self) -> None:
+        conv = self._conv()
+        conv._process_data(
+            {
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {"chunks": ["Answer"]},
+                    },
+                ],
+            }
+        )
+        conv._process_data(
+            {
+                "final": True,
+                "blocks": [
+                    {
+                        "intended_usage": "ask_text",
+                        "markdown_block": {"chunks": [" text"]},
+                    },
+                ],
+            }
+        )
+
+        assert conv.answer == "Answer text"
+        assert conv._chunks == ["Answer", " text"]
 
     def test_invalid_json_in_text_raises_response_parsing_error(self) -> None:
         conv = self._conv()
-        data = {"text": "not valid json {"}
+        data = {"text": "{invalid json syntax"}
 
         with pytest.raises(ResponseParsingError, match="Invalid JSON"):
             conv._process_data(data)
+
+    def test_plain_text_error_in_text_surfaces_actual_message(self) -> None:
+        conv = self._conv()
+        data = {"text": "Error in processing query."}
+
+        with pytest.raises(ResponseParsingError) as exc_info:
+            conv._process_data(data)
+
+        assert "Error in processing query." in str(exc_info.value)
 
     def test_unexpected_structure_raises(self) -> None:
         conv = self._conv()

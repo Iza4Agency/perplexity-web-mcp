@@ -35,10 +35,16 @@ from perplexity_web_mcp.shared import (
     SOURCE_FOCUS_NAMES,
     Models,
     SourceFocusName,
+    SourceResolutionError,
     ask,
     build_council_model_list,
+    format_thread_list,
+    get_connector_sources,
     get_limit_cache,
+    get_thread,
+    list_threads,
     resolve_model,
+    resolve_source_focus,
 )
 from perplexity_web_mcp.token_store import load_token
 
@@ -88,6 +94,15 @@ def cli(ctx):
         click.echo(ctx.get_help())
 
 
+def _validate_source_for_cli(source: str) -> bool:
+    try:
+        resolve_source_focus(source)
+    except SourceResolutionError as error:
+        print(str(error), file=sys.stderr)
+        return False
+    return True
+
+
 # ── Ask ────────────────────────────────────────────────────────────────────
 
 
@@ -95,7 +110,13 @@ def cli(ctx):
 @click.argument("query")
 @click.option("-m", "--model", "model_name", default="auto", help=f"Model to use ({', '.join(MODEL_NAMES)}).")
 @click.option("-t", "--thinking", is_flag=True, help="Enable extended thinking mode.")
-@click.option("-s", "--source", "source", default="web", help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}).")
+@click.option(
+    "-s",
+    "--source",
+    "source",
+    default="web",
+    help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}) or connector source ID.",
+)
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
 @click.option("--no-citations", is_flag=True, help="Suppress citation URLs.")
 @click.option("--intent", default="standard", help="Routing intent: quick, standard, detailed, research.")
@@ -114,8 +135,7 @@ def ask_cmd(query, model_name, thinking, source, json_output, no_citations, inte
 
 def _cmd_ask_impl(query, model_name, thinking, source, json_output, no_citations, intent):
     """Implementation for ask command (kept separate for testability)."""
-    if source not in SOURCE_FOCUS_NAMES:
-        print(f"Error: Unknown source '{source}'. Available: {', '.join(SOURCE_FOCUS_NAMES)}", file=sys.stderr)
+    if not _validate_source_for_cli(source):
         return 1
 
     try:
@@ -173,7 +193,13 @@ def _cmd_ask_impl(query, model_name, thinking, source, json_output, no_citations
 
 @cli.command()
 @click.argument("query")
-@click.option("-s", "--source", "source", default="web", help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}).")
+@click.option(
+    "-s",
+    "--source",
+    "source",
+    default="web",
+    help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}) or connector source ID.",
+)
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
 def research(query, source, json_output):
     """Deep research on a topic.
@@ -191,6 +217,9 @@ def research(query, source, json_output):
 
 def _cmd_research_impl(query, source, json_output):
     """Implementation for research command."""
+    if not _validate_source_for_cli(source):
+        return 1
+
     model = Models.DEEP_RESEARCH
 
     try:
@@ -230,6 +259,176 @@ def _cmd_research_impl(query, source, json_output):
     return 0
 
 
+# ── Thread Library ─────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.option("-l", "--limit", default=20, help="Max threads to return (default 20, max 100).")
+@click.option("-o", "--offset", default=0, help="Pagination offset — skip this many threads.")
+@click.option("-s", "--search", "search_term", default="", help="Filter threads by keyword.")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
+def threads(limit, offset, search_term, json_output):
+    """Browse your Perplexity thread library. FREE — no quota consumed.
+
+    Lists your past Perplexity conversations with titles, models, and previews.
+    Use the slug shown for each thread with 'pwm export' or to resume a conversation.
+
+    \b
+    Examples:
+      pwm threads                          # most recent 20 threads
+      pwm threads --limit 50              # get 50 threads
+      pwm threads --search "quantum"      # filter by keyword
+      pwm threads --offset 20             # page 2 (skip first 20)
+      pwm threads --json                  # JSON output (for piping)
+    """
+    code = _cmd_threads_impl(limit, offset, search_term, json_output)
+    raise SystemExit(code)
+
+
+def _cmd_threads_impl(limit, offset, search_term, json_output):
+    """Implementation for threads command."""
+    try:
+        thread_list = list_threads(limit=limit, offset=offset, search_term=search_term)
+    except AuthenticationError as e:
+        print(f"Error: Not authenticated. {e}", file=sys.stderr)
+        print("Re-authenticate with: pwm login", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error fetching threads: {e}", file=sys.stderr)
+        return 1
+
+    if json_output:
+        import orjson
+
+        sys.stdout.buffer.write(orjson.dumps([t.model_dump() for t in thread_list], option=orjson.OPT_INDENT_2))
+        sys.stdout.buffer.write(b"\n")
+    else:
+        print(format_thread_list(thread_list))
+
+    return 0
+
+
+@cli.command()
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Output file path. Defaults to pplx-export-<date>.json in current directory.",
+)
+@click.option("-s", "--search", "search_term", default="", help="Only export threads matching this keyword.")
+@click.option("-l", "--limit", default=100, help="Max threads to export (default 100).")
+def export(output, search_term, limit):
+    """Export your Perplexity thread library to a JSON file. FREE — no quota consumed.
+
+    Fetches your thread list and then retrieves the full conversation history for
+    each thread, saving everything to a timestamped JSON file.
+
+    Inspired by kylebrodeur/perplexity-exporter, but uses the REST API directly
+    (no browser required) making it dramatically faster.
+
+    \b
+    Examples:
+      pwm export                              # export all threads to pplx-export-<date>.json
+      pwm export --output ./my-backup.json   # custom output path
+      pwm export --search "ai"               # only export threads matching "ai"
+      pwm export --limit 50                  # cap at 50 threads
+    """
+    code = _cmd_export_impl(output, search_term, limit)
+    raise SystemExit(code)
+
+
+def _cmd_export_impl(output, search_term, limit):
+    """Implementation for export command."""
+    import datetime
+
+    import orjson
+    from rich.console import Console
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+
+    console = Console(stderr=True)
+
+    # Determine output path
+    if output is None:
+        date_str = datetime.date.today().isoformat()
+        output = f"pplx-export-{date_str}.json"
+
+    console.print(f"[bold cyan]Perplexity Thread Export[/]\nOutput: {output}\n")
+
+    # Step 1: List threads
+    try:
+        with console.status("[cyan]Fetching thread list...[/]"):
+            thread_list = list_threads(limit=limit, search_term=search_term)
+    except AuthenticationError as e:
+        console.print(f"[red]Error: Not authenticated. {e}[/]")
+        console.print("Re-authenticate with: [bold]pwm login[/]")
+        return 1
+    except Exception as e:
+        console.print(f"[red]Error fetching thread list: {e}[/]")
+        return 1
+
+    if not thread_list:
+        console.print("[yellow]No threads found.[/]")
+        return 0
+
+    console.print(f"Found [bold]{len(thread_list)}[/] thread(s). Fetching full history...\n")
+
+    # Step 2: Fetch full detail for each thread
+    export_data: list[dict] = []
+    errors: list[str] = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Exporting threads", total=len(thread_list))
+
+        for t in thread_list:
+            slug = t.slug
+            title = t.title or slug
+            progress.update(task, description=f"[cyan]{title[:50]}[/]", advance=0)
+
+            if not slug:
+                errors.append(f"Skipped thread with no slug: {title!r}")
+                progress.advance(task)
+                continue
+
+            try:
+                thread_detail = get_thread(slug)
+                export_data.append(
+                    {
+                        "slug": slug,
+                        "title": title,
+                        "metadata": t.model_dump(),
+                        "thread": thread_detail.model_dump(),
+                    }
+                )
+            except Exception as e:
+                errors.append(f"Failed to fetch thread '{slug}' ({title!r}): {e}")
+
+            progress.advance(task)
+
+    from pathlib import Path
+
+    # Step 3: Write output file
+    try:
+        with Path(output).open("wb") as f:
+            f.write(orjson.dumps(export_data, option=orjson.OPT_INDENT_2))
+    except OSError as e:
+        console.print(f"[red]Error writing file: {e}[/]")
+        return 1
+
+    console.print(f"\n[green]✓[/] Exported [bold]{len(export_data)}[/] threads to [bold]{output}[/]")
+    if errors:
+        console.print(f"[yellow]⚠ {len(errors)} error(s):[/]")
+        for err in errors:
+            console.print(f"  [dim]{err}[/]")
+
+    return 0
+
+
 # ── Council ────────────────────────────────────────────────────────────────
 
 COUNCIL_MODEL_NAMES = COUNCIL_ELIGIBLE_MODEL_NAMES
@@ -245,7 +444,13 @@ COUNCIL_MODEL_NAMES = COUNCIL_ELIGIBLE_MODEL_NAMES
     help=f"Comma-separated models ({', '.join(COUNCIL_MODEL_NAMES)}).",
 )
 @click.option("-t", "--thinking", is_flag=True, help="Enable extended thinking mode.")
-@click.option("-s", "--source", "source", default="web", help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}).")
+@click.option(
+    "-s",
+    "--source",
+    "source",
+    default="web",
+    help=f"Source focus ({', '.join(SOURCE_FOCUS_NAMES)}) or connector source ID.",
+)
 @click.option("--no-synthesis", is_flag=True, help="Skip consensus synthesis.")
 @click.option(
     "--chairman",
@@ -262,7 +467,7 @@ def council(query, models_str, thinking, source, no_synthesis, chairman, json_ou
     \b
     Examples:
       pwm council "What are best practices for microservices?"
-      pwm council "Compare Rust and Go" -m gpt54,claude_sonnet
+      pwm council "Compare Rust and Go" -m gpt56_terra,claude_sonnet
       pwm council "Explain quantum computing" -s academic --thinking
       pwm council "React vs Vue" --chairman claude_sonnet
       pwm council "React vs Vue" --no-synthesis --json
@@ -273,8 +478,7 @@ def council(query, models_str, thinking, source, no_synthesis, chairman, json_ou
 
 def _cmd_council_impl(query, models_str, source, synthesize, json_output, thinking=False, chairman="sonar"):
     """Implementation for council command."""
-    if source not in SOURCE_FOCUS_NAMES:
-        print(f"Error: Unknown source '{source}'. Available: {', '.join(SOURCE_FOCUS_NAMES)}", file=sys.stderr)
+    if not _validate_source_for_cli(source):
         return 1
 
     # Validate model names
@@ -445,6 +649,20 @@ def _cmd_usage_impl(refresh):
         table.add_row("Browser Agent", _color(limits.remaining_agentic_research))
 
         console.print(table)
+
+        source_rows = [source for source in limits.source_limits if source.monthly_limit is not None]
+        if source_rows:
+            source_table = Table(title="Source Limits", show_header=True, header_style="bold cyan")
+            source_table.add_column("Source ID", style="bold")
+            source_table.add_column("Remaining", justify="right")
+            source_table.add_column("Monthly Limit", justify="right")
+            for source in source_rows:
+                source_table.add_row(
+                    source.source_id,
+                    "unlimited" if source.remaining is None else str(source.remaining),
+                    "unlimited" if source.monthly_limit is None else str(source.monthly_limit),
+                )
+            console.print(source_table)
     else:
         console.print("[yellow]WARNING:[/] Could not fetch rate limits (network error or token issue).")
 
@@ -529,6 +747,64 @@ def _cmd_usage_impl(refresh):
     return 0
 
 
+# ── Connectors ─────────────────────────────────────────────────────────────
+
+
+@cli.group()
+def connectors():
+    """List account connector source IDs."""
+
+
+@connectors.command(name="list")
+@click.option("--refresh", is_flag=True, help="Refresh limits before listing connectors.")
+def connectors_list(refresh):
+    """List source IDs visible in the account rate-limit API."""
+    code = _cmd_connectors_list(refresh=refresh)
+    raise SystemExit(code)
+
+
+def _cmd_connectors_list(refresh: bool = False) -> int:
+    """Implementation for connectors list command."""
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    token = load_token()
+    if not token:
+        print("Not authenticated. Run `pwm login` first.", file=sys.stderr)
+        return 1
+
+    cache = get_limit_cache()
+    if cache is None:
+        print("Could not initialize limit cache.", file=sys.stderr)
+        return 1
+
+    limits = cache.get_rate_limits(force_refresh=refresh)
+    if limits is None:
+        print("Could not fetch connector source IDs.", file=sys.stderr)
+        return 1
+
+    connector_sources = get_connector_sources(limits.source_limits)
+    if not connector_sources:
+        console.print("[yellow]No connector source IDs were reported by this account.[/]")
+        return 0
+
+    table = Table(title="Connector Sources", show_header=True, header_style="bold cyan")
+    table.add_column("Source ID", style="bold")
+    table.add_column("Remaining", justify="right")
+    table.add_column("Monthly Limit", justify="right")
+
+    for source in connector_sources:
+        table.add_row(
+            source.source_id,
+            "unlimited" if source.remaining is None else str(source.remaining),
+            "unlimited" if source.monthly_limit is None else str(source.monthly_limit),
+        )
+
+    console.print(table)
+    return 0
+
+
 # ── API ────────────────────────────────────────────────────────────────────
 
 
@@ -537,14 +813,19 @@ def _cmd_usage_impl(refresh):
 @click.option("-p", "--port", default=8080, type=int, help="Port number.")
 @click.option("--model", "default_model", default="auto", help="Default model.")
 @click.option("--log-level", default="info", help="Log level: debug, info, warning, error.")
-def api(host, port, default_model, log_level):
+@click.option(
+    "--trace",
+    is_flag=True,
+    help="Enable trace mode (logs un-truncated payloads to ~/.config/perplexity-web-mcp/logs/api-trace.log).",
+)
+def api(host, port, default_model, log_level, trace):
     """Start the Anthropic/OpenAI API-compatible server.
 
     \b
     Examples:
       pwm api
       pwm api --port 9090
-      pwm api --model gpt52 --log-level debug
+      pwm api --trace
     """
     import os
 
@@ -552,6 +833,12 @@ def api(host, port, default_model, log_level):
     os.environ.setdefault("PORT", str(port))
     os.environ.setdefault("LOG_LEVEL", log_level)
     os.environ.setdefault("DEFAULT_MODEL", default_model)
+    if trace:
+        os.environ["PWM_TRACE"] = "1"
+        from perplexity_web_mcp.trace import get_trace_log_path, reset_trace_log
+
+        reset_trace_log()
+        print(f"Trace mode enabled! Logging to {get_trace_log_path()}", file=sys.stderr)
 
     from perplexity_web_mcp.api import run_server
 

@@ -17,7 +17,14 @@ from typing import Any
 
 from curl_cffi.requests import Session
 
-from .constants import API_BASE_URL, ENDPOINT_CREDITS, ENDPOINT_RATE_LIMITS, ENDPOINT_USER_SETTINGS, SESSION_COOKIE_NAME
+from .constants import (
+    API_BASE_URL,
+    APP_HEADERS,
+    ENDPOINT_CREDITS,
+    ENDPOINT_RATE_LIMITS,
+    ENDPOINT_USER_SETTINGS,
+    SESSION_COOKIE_NAME,
+)
 from .logging import get_logger
 
 
@@ -304,7 +311,12 @@ def _create_session(token: str) -> Session:
     """Create a minimal session for REST API calls."""
     return Session(
         impersonate="chrome",
-        headers={"Referer": API_BASE_URL, "Origin": API_BASE_URL},
+        headers={
+            **APP_HEADERS,
+            "Referer": API_BASE_URL,
+            "Origin": API_BASE_URL,
+            "Accept": "application/json",
+        },
         cookies={SESSION_COOKIE_NAME: token},
     )
 

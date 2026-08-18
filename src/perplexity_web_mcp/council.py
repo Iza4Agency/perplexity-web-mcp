@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .config import ConversationConfig
-from .enums import CitationMode, SearchFocus, SourceFocus
+from .enums import CitationMode, SearchFocus
 from .logging import get_logger
 from .models import Model, Models
 from .shared import COUNCIL_DEFAULT_MODEL_NAMES, build_council_model_list
@@ -96,7 +96,7 @@ def _query_single_model(
     model_name: str,
     model: Model,
     query: str,
-    sources: list[SourceFocus],
+    sources: list[str],
     search_focus: SearchFocus,
 ) -> CouncilMemberResult:
     """Query a single model. Designed to run inside a thread pool."""
@@ -175,7 +175,7 @@ def _build_synthesis_prompt(
 def _synthesize(
     query: str,
     results: list[CouncilMemberResult],
-    sources: list[SourceFocus],
+    sources: list[str],
     search_focus: SearchFocus,
     synthesis_model: Model | None = None,
 ) -> str:
@@ -216,7 +216,7 @@ def council_ask(
     Args:
         query: The question to ask all models.
         models: List of (display_name, Model) tuples. Defaults to
-                COUNCIL_DEFAULT_MODELS (GPT-5.4, Claude Sonnet, Gemini Pro).
+                COUNCIL_DEFAULT_MODELS (GPT-5.6 Terra, Claude Sonnet, Gemini Pro).
         source_focus: Source focus for all queries (none/web/academic/social/finance/all).
         synthesize: Whether to produce a synthesized consensus (adds 1 Sonar 2 synthesis query by default).
         thinking: Use thinking model variants for default council members.
@@ -226,7 +226,7 @@ def council_ask(
     Returns:
         CouncilResponse with individual results and optional synthesis.
     """
-    from .shared import SOURCE_FOCUS_MAP
+    from .shared import resolve_source_focus
 
     if models is not None:
         council = models
@@ -234,8 +234,7 @@ def council_ask(
         council = COUNCIL_DEFAULT_MODELS_THINKING
     else:
         council = COUNCIL_DEFAULT_MODELS
-    sources = SOURCE_FOCUS_MAP.get(source_focus, [SourceFocus.WEB])
-    search_mode = SearchFocus.WRITING if source_focus == "none" else SearchFocus.WEB
+    sources, search_mode = resolve_source_focus(source_focus)
 
     model_names = [name for name, _ in council]
     logger.info(f"Council: querying {len(council)} models in parallel: {model_names}")

@@ -192,7 +192,7 @@ class SmartRouter:
         ideal_map: dict[Intent, tuple[Model, str, str]] = {
             Intent.QUICK: (Models.SONAR, "sonar", "standard"),
             Intent.STANDARD: (Models.BEST, "auto", "pro"),
-            Intent.DETAILED: (Models.CLAUDE_46_SONNET, "claude_sonnet", "pro"),
+            Intent.DETAILED: (Models.CLAUDE_50_SONNET, "claude_sonnet", "pro"),
             Intent.RESEARCH: (Models.DEEP_RESEARCH, "deep_research", "deep_research"),
         }
         model, model_name, search_type = ideal_map[intent]
@@ -245,7 +245,7 @@ class SmartRouter:
     def _detailed(self, quota: QuotaState, snapshot: dict[str, Any]) -> RoutingDecision:
         if quota.pro_level in (QuotaLevel.HEALTHY, QuotaLevel.LOW):
             return RoutingDecision(
-                model=Models.CLAUDE_46_SONNET,
+                model=Models.CLAUDE_50_SONNET,
                 model_name="claude_sonnet",
                 search_type="pro",
                 intent=Intent.DETAILED,
@@ -289,7 +289,7 @@ class SmartRouter:
             )
         if quota.pro_level != QuotaLevel.EXHAUSTED:
             return RoutingDecision(
-                model=Models.CLAUDE_46_SONNET,
+                model=Models.CLAUDE_50_SONNET,
                 model_name="claude_sonnet",
                 search_type="pro",
                 intent=Intent.RESEARCH,

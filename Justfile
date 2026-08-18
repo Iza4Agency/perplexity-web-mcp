@@ -4,7 +4,7 @@ default:
 lint:
     npx prettier --check .
     uv run ruff check
-    uv run ty check
+    uv run ty check src
 
 format:
     npx prettier --write .

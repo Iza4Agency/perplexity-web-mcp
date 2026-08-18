@@ -17,16 +17,31 @@ import weakref
 from fastmcp import FastMCP
 from loguru import logger
 
+from perplexity_web_mcp.auth import (
+    create_auth_session,
+    extract_session_token,
+    follow_auth_callback,
+    request_verification_code,
+    resolve_redirect_url,
+    verify_totp,
+)
 from perplexity_web_mcp.models import Models
 from perplexity_web_mcp.shared import (
     COUNCIL_DEFAULT_MODELS_STR,
     ModelName,
     SourceFocusName,
+    SourceResolutionError,
     ask,
     build_council_model_list,
     council_ask,
+    format_thread_detail,
+    format_thread_list,
+    get_connector_sources,
     get_limit_cache,
+    get_thread,
+    list_threads,
     resolve_model,
+    resolve_source_focus,
     smart_ask,
 )
 from perplexity_web_mcp.token_store import load_token, save_token
@@ -40,7 +55,8 @@ mcp = FastMCP(
         "- pplx_sonar / pplx_smart_query(intent='quick'): Sonar 2 (in-house). Still uses your "
         "Perplexity session; limits depend on your plan — call pplx_usage() first.\n"
         "- pplx_ask / pplx_query / all model-specific tools: 1 PRO SEARCH each (weekly pool)\n"
-        "- pplx_deep_research: 1 DEEP RESEARCH each (small monthly pool, ~5-10 total)\n\n"
+        "- pplx_deep_research: 1 DEEP RESEARCH each (small monthly pool, ~5-10 total)\n"
+        "- pplx_list_threads / pplx_get_thread: FREE — read-only, zero quota cost\n\n"
         "MANDATORY PROTOCOL:\n"
         "1. On your FIRST query of the session, call pplx_usage() to check remaining quotas.\n"
         "   Read the Subscription line: Pro users must avoid Max-only models.\n"
@@ -51,19 +67,26 @@ mcp = FastMCP(
         "4. Reserve pplx_deep_research for user-requested deep dives only — NEVER use it "
         "autonomously without asking the user first. For complex research that might timeout, "
         "use pplx_deep_research_start and poll with pplx_research_status instead.\n"
-        "5. Avoid model-specific tools (pplx_gpt54, pplx_claude_sonnet, etc.) unless the "
+        "5. Avoid model-specific tools (pplx_gpt56_terra, pplx_claude_sonnet, etc.) unless the "
         "user explicitly requests a specific model. Each call costs 1 Pro Search query.\n\n"
         "WHEN TO USE EACH INTENT:\n"
         "- quick: Facts, definitions, 'what is X', current date/weather, simple lookups\n"
         "- standard: How-to questions, comparisons, explanations needing web sources\n"
         "- detailed: Complex analysis, multi-source synthesis, technical deep-dives\n"
         "- research: Comprehensive reports (only when user explicitly asks for research)\n\n"
-        "All tools support source_focus: none, web, academic, social, finance, all.\n"
+        "THREAD LIBRARY (quota-free):\n"
+        "- Use pplx_list_threads() to browse past conversations — zero quota cost.\n"
+        '  Search with search_term="keyword" before spending a Pro query on something already researched.\n'
+        "- Use pplx_get_thread(slug) to load the full history of any past thread.\n"
+        "- To resume a past conversation: call pplx_get_thread(slug) to load context,\n"
+        "  then pass conversation_id=slug to any query tool to continue right where it left off.\n\n"
+        "All query tools support source_focus: none, web, academic, social, finance, all, "
+        "or an account connector source ID from pplx_connectors().\n"
         "Use source_focus='none' for model-only queries without web search.\n\n"
         "AUTHENTICATION: If you get a 403 error or 'token expired' message:\n"
         "1. pplx_auth_status — check current authentication status\n"
         "2. pplx_auth_request_code — send verification code to email\n"
-        "3. pplx_auth_complete — complete auth with the 6-digit code"
+        "3. pplx_auth_complete — complete email OTP and any requested TOTP challenge"
     ),
 )
 
@@ -129,12 +152,12 @@ def pplx_query(
 
     Args:
         query: The question to ask
-        model: Model to use - auto, sonar, deep_research, gpt54, gpt55,
-               claude_sonnet, claude_opus, gemini_pro, nemotron, kimi_k26
-        thinking: Enable extended thinking mode (available for gpt54, gpt55, claude_sonnet,
-                  claude_opus, kimi_k26; always on for gemini_pro and nemotron)
+        model: Model to use - auto, sonar, deep_research, gpt56_terra, gpt56_sol, grok45,
+               claude_sonnet, claude_opus, gemini_pro, nemotron, glm52, kimi_k26
+        thinking: Enable extended thinking mode (available for gpt56_terra, gpt56_sol, grok45, claude_sonnet,
+                  claude_opus, kimi_k26; always on for gemini_pro, nemotron, and glm52)
         source_focus: Source type - none (model only, no search), web, academic,
-                      social, finance, all
+                      social, finance, all, or connector source ID from pplx_connectors()
     """
     selected_model = resolve_model(model, thinking=thinking)
     return ask(query, selected_model, source_focus, conversation_id)
@@ -173,6 +196,11 @@ def pplx_deep_research_start(query: str, source_focus: SourceFocusName = "web") 
     Use this instead of pplx_deep_research for complex queries to avoid connection timeouts.
     Returns a task_id immediately. Poll pplx_research_status with the task_id to get the result.
     """
+    try:
+        resolve_source_focus(source_focus)
+    except SourceResolutionError as e:
+        return str(e)
+
     task_id = str(uuid.uuid4())
     with _research_lock:
         _research_tasks[task_id] = {"status": "in_progress"}
@@ -219,41 +247,57 @@ def pplx_sonar(query: str, source_focus: SourceFocusName = "web", conversation_i
 
 
 @mcp.tool
-def pplx_gpt54(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
-    """GPT-5.4 — OpenAI's versatile model. COSTS 1 PRO SEARCH QUERY."""
-    return ask(query, Models.GPT_54, source_focus, conversation_id)
+def pplx_gpt56_terra(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
+    """GPT-5.6 Terra — OpenAI's versatile model. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.GPT_56_TERRA, source_focus, conversation_id)
 
 
 @mcp.tool
-def pplx_gpt54_thinking(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
-    """GPT-5.4 Thinking — OpenAI's versatile model with extended thinking. COSTS 1 PRO SEARCH QUERY."""
-    return ask(query, Models.GPT_54_THINKING, source_focus, conversation_id)
+def pplx_gpt56_terra_thinking(
+    query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None
+) -> str:
+    """GPT-5.6 Terra Thinking — OpenAI's versatile model with thinking. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.GPT_56_TERRA_THINKING, source_focus, conversation_id)
 
 
 @mcp.tool
-def pplx_gpt55(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
-    """GPT-5.5 — OpenAI's latest model. COSTS 1 PRO SEARCH QUERY. Requires Max subscription."""
-    return ask(query, Models.GPT_55, source_focus, conversation_id)
+def pplx_gpt56_sol(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
+    """GPT-5.6 Sol — OpenAI's most powerful model. COSTS 1 PRO SEARCH QUERY. Requires Max subscription."""
+    return ask(query, Models.GPT_56_SOL, source_focus, conversation_id)
 
 
 @mcp.tool
-def pplx_gpt55_thinking(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
-    """GPT-5.5 Thinking — OpenAI's latest model with extended thinking. COSTS 1 PRO SEARCH QUERY. Requires Max subscription."""
-    return ask(query, Models.GPT_55_THINKING, source_focus, conversation_id)
+def pplx_gpt56_sol_thinking(
+    query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None
+) -> str:
+    """GPT-5.6 Sol Thinking — OpenAI's most powerful model with thinking. COSTS 1 PRO SEARCH QUERY. Requires Max subscription."""
+    return ask(query, Models.GPT_56_SOL_THINKING, source_focus, conversation_id)
+
+
+@mcp.tool
+def pplx_grok45(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
+    """Grok 4.5 — xAI's most advanced model. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.GROK_45, source_focus, conversation_id)
+
+
+@mcp.tool
+def pplx_grok45_thinking(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
+    """Grok 4.5 Thinking — xAI's most advanced model with thinking. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.GROK_45_THINKING, source_focus, conversation_id)
 
 
 @mcp.tool
 def pplx_claude_sonnet(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
-    """Claude Sonnet 4.6 — Anthropic's fast model. COSTS 1 PRO SEARCH QUERY."""
-    return ask(query, Models.CLAUDE_46_SONNET, source_focus, conversation_id)
+    """Claude Sonnet 5 — Anthropic's fast model. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.CLAUDE_50_SONNET, source_focus, conversation_id)
 
 
 @mcp.tool
 def pplx_claude_sonnet_think(
     query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None
 ) -> str:
-    """Claude Sonnet 4.6 Thinking — Anthropic's fast model with extended thinking. COSTS 1 PRO SEARCH QUERY."""
-    return ask(query, Models.CLAUDE_46_SONNET_THINKING, source_focus, conversation_id)
+    """Claude Sonnet 5 Thinking — Anthropic's newest reasoning model. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.CLAUDE_50_SONNET_THINKING, source_focus, conversation_id)
 
 
 @mcp.tool
@@ -282,6 +326,12 @@ def pplx_nemotron_thinking(
 ) -> str:
     """Nemotron 3 Ultra — NVIDIA's Nemotron 3 Ultra 550B model with extended thinking. COSTS 1 PRO SEARCH QUERY."""
     return ask(query, Models.NEMOTRON_3_ULTRA, source_focus, conversation_id)
+
+
+@mcp.tool
+def pplx_glm52(query: str, source_focus: SourceFocusName = "web", conversation_id: str | None = None) -> str:
+    """GLM 5.2 — Z.ai's advanced model with thinking always enabled. COSTS 1 PRO SEARCH QUERY."""
+    return ask(query, Models.GLM_5_2, source_focus, conversation_id)
 
 
 @mcp.tool
@@ -324,7 +374,7 @@ def pplx_smart_query(
         query: The question to ask
         intent: Query complexity — quick (default for most), standard, detailed, research
         source_focus: Source type — none (model only, no search), web, academic,
-                      social, finance, all
+                      social, finance, all, or connector source ID from pplx_connectors()
     """
     result = smart_ask(query, intent=intent, source_focus=source_focus)
     return result.format_response()
@@ -342,26 +392,26 @@ def pplx_council(
     """Model Council — query multiple models in parallel, get synthesized consensus.
 
     IMPORTANT — BEFORE calling this tool, you MUST:
-    1. Tell the user the available models: sonar, gpt54, gpt55, claude_sonnet, claude_opus, gemini_pro, nemotron, kimi_k26
-    2. Check pplx_usage() first. If Subscription is Pro, do not include Max-only models: gpt55, claude_opus
+    1. Tell the user the available models: sonar, gpt56_terra, gpt56_sol, grok45, claude_sonnet, claude_opus, gemini_pro, nemotron, glm52, kimi_k26
+    2. Check pplx_usage() first. If Subscription is Pro, do not include Max-only models: gpt56_sol, claude_opus
     3. Ask the user WHICH models they want in their council and HOW MANY
     4. Inform them of the cost: each council model = 1 Pro Search query, plus synthesis
        (default chairman sonar = Sonar 2 pass — still counts as a normal query toward limits)
     5. Get explicit confirmation before executing
 
-    Default council: GPT-5.4, Claude Sonnet 4.6, Gemini 3.1 Pro (Pro-compatible, 3 diverse providers).
+    Default council: GPT-5.6 Terra, Claude Sonnet 5, Gemini 3.1 Pro (Pro-compatible, 3 diverse providers).
 
     Args:
         query: The question to ask all council models
-        source_focus: Source type for all models (none/web/academic/social/finance/all)
+        source_focus: Source type for all models (none/web/academic/social/finance/all or connector source ID)
         models: Comma-separated model names to use as council members.
-                Available: sonar, gpt54, gpt55, claude_sonnet, claude_opus, gemini_pro, nemotron, kimi_k26.
-                Default: "gpt54,claude_sonnet,gemini_pro" (3 models + synthesis = 4 Pro Searches)
-                Max-only: gpt55, claude_opus. Exclude these when pplx_usage shows a Pro subscription.
+                Available: sonar, gpt56_terra, gpt56_sol, grok45, claude_sonnet, claude_opus, gemini_pro, nemotron, glm52, kimi_k26.
+                Default: "gpt56_terra,claude_sonnet,gemini_pro" (3 models + synthesis = 4 Pro Searches)
+                Max-only: gpt56_sol, claude_opus. Exclude these when pplx_usage shows a Pro subscription.
         synthesize: Whether to synthesize a consensus from all responses.
                     Set false to get only individual responses (saves 1 Sonar 2 call).
-        thinking: Enable extended thinking for council models (gpt54, gpt55, claude_sonnet,
-                  claude_opus, kimi_k26 support toggle; gemini_pro and nemotron are always thinking).
+        thinking: Enable extended thinking for council models (gpt56_terra, gpt56_sol, grok45, claude_sonnet,
+                  claude_opus, kimi_k26 support toggle; gemini_pro, nemotron, and glm52 are always thinking).
         chairman: Model to use for synthesis (default: "sonar" / Sonar 2).
                   Non-sonar chairmen cost 1 extra Pro Search query.
     """
@@ -373,15 +423,132 @@ def pplx_council(
 
     synthesis_model = resolve_model(chairman) if chairman != "sonar" else None
 
-    result = council_ask(
-        query=query,
-        models=model_list,
-        source_focus=source_focus,
-        synthesize=synthesize,
-        thinking=thinking,
-        synthesis_model=synthesis_model,
-    )
+    try:
+        result = council_ask(
+            query=query,
+            models=model_list,
+            source_focus=source_focus,
+            synthesize=synthesize,
+            thinking=thinking,
+            synthesis_model=synthesis_model,
+        )
+    except SourceResolutionError as e:
+        return str(e)
     return result.format_response()
+
+
+# =============================================================================
+# Thread Library Tools (read-only, zero quota cost)
+# =============================================================================
+
+
+@mcp.tool
+def pplx_list_threads(
+    limit: int = 20,
+    offset: int = 0,
+    search_term: str = "",
+) -> str:
+    """Browse your Perplexity thread library. FREE — zero quota cost.
+
+    Returns a paginated list of your past Perplexity conversations with their
+    slugs, titles, models used, and answer previews.
+
+    PRIMARY USE CASES:
+    1. "Did I already research X?" — search before spending a Pro query:
+       pplx_list_threads(search_term="quantum computing")
+    2. Find a conversation to resume — get its slug, then pass it as
+       conversation_id to any pplx_* query tool to continue right where it left off.
+    3. Retrieve full history — call pplx_get_thread(slug) with any slug from this list.
+
+    Args:
+        limit: Max threads to return (default 20, max 100).
+        offset: Skip this many threads — use for pagination (e.g. offset=20 for page 2).
+        search_term: Optional keyword to filter threads by title or content.
+    """
+    from perplexity_web_mcp.exceptions import AuthenticationError
+
+    try:
+        threads = list_threads(limit=limit, offset=offset, search_term=search_term)
+        return format_thread_list(threads)
+    except AuthenticationError as e:
+        return f"Error: Not authenticated. {e}\n\nRe-authenticate with pplx_auth_request_code."
+    except Exception as e:
+        return f"Error fetching thread list: {e}"
+
+
+@mcp.tool
+def pplx_get_thread(slug: str) -> str:
+    """Fetch the full conversation history for a Perplexity thread. FREE — zero quota cost.
+
+    Returns the complete Q&A turns, sources, and related queries for any past thread.
+    Get the slug from pplx_list_threads, or from the [Conversation ID: ...] footer
+    returned by any pplx_* query tool.
+
+    RESUME PATTERN — to continue a past conversation:
+    1. pplx_list_threads(search_term="topic") — find the thread and its slug
+    2. pplx_get_thread(slug) — read the full history for context
+    3. pplx_smart_query("follow-up question", conversation_id=slug) — continue it
+
+    Args:
+        slug: Thread UUID / slug. Obtain from pplx_list_threads or a previous
+              [Conversation ID: ...] response footer.
+    """
+    from perplexity_web_mcp.exceptions import AuthenticationError
+
+    if not slug or not slug.strip():
+        return "Error: slug is required. Get it from pplx_list_threads."
+
+    try:
+        thread_data = get_thread(slug.strip())
+        return format_thread_detail(thread_data)
+    except AuthenticationError as e:
+        return f"Error: Not authenticated. {e}\n\nRe-authenticate with pplx_auth_request_code."
+    except Exception as e:
+        return f"Error fetching thread '{slug}': {e}"
+
+
+# =============================================================================
+# MCP Resources (thread library as addressable resources)
+# =============================================================================
+
+
+@mcp.resource("perplexity://library")
+def library_resource() -> str:
+    """Your Perplexity thread library — most recent 50 threads.
+
+    Returns a formatted list of your recent Perplexity conversations.
+    Use perplexity://thread/{slug} to access a specific thread's full history.
+    """
+    from perplexity_web_mcp.exceptions import AuthenticationError
+
+    try:
+        threads = list_threads(limit=50)
+        return format_thread_list(threads)
+    except AuthenticationError:
+        return "Not authenticated. Run pplx_auth_request_code to authenticate."
+    except Exception as e:
+        return f"Error loading library: {e}"
+
+
+@mcp.resource("perplexity://thread/{slug}")
+def thread_resource(slug: str) -> str:
+    """Full conversation history for a specific Perplexity thread.
+
+    Returns the complete Markdown-formatted Q&A turns, sources, and related
+    queries for the thread identified by {slug}.
+
+    Get slugs from the perplexity://library resource or from any pplx_* query
+    response footer ([Conversation ID: ...]).
+    """
+    from perplexity_web_mcp.exceptions import AuthenticationError
+
+    try:
+        thread_data = get_thread(slug)
+        return format_thread_detail(thread_data)
+    except AuthenticationError:
+        return "Not authenticated. Run pplx_auth_request_code to authenticate."
+    except Exception as e:
+        return f"Error loading thread '{slug}': {e}"
 
 
 # =============================================================================
@@ -447,6 +614,32 @@ def pplx_usage(refresh: bool = False) -> str:
         parts.append(credits.format_summary())
 
     return "\n".join(parts)
+
+
+@mcp.tool
+def pplx_connectors(refresh: bool = False) -> str:
+    """List account connector source IDs that can be passed as source_focus.
+
+    Returns source IDs from the Perplexity rate-limit API. Use these IDs as
+    source_focus values, for example source_focus="pitchbook_mcp_cashmere".
+    """
+    cache = get_limit_cache()
+    if cache is None:
+        return "NOT AUTHENTICATED\n\nNo session token found. Authenticate first with pplx_auth_request_code."
+
+    limits = cache.get_rate_limits(force_refresh=refresh)
+    if limits is None:
+        return "Could not fetch source limits."
+
+    connector_sources = get_connector_sources(limits.source_limits)
+    if not connector_sources:
+        return "No connector source IDs were reported by this account."
+
+    lines = ["Connector source IDs:"]
+    for source in connector_sources:
+        quota = "unlimited" if source.monthly_limit is None else f"{source.remaining}/{source.monthly_limit}"
+        lines.append(f"- {source.source_id}: {quota}")
+    return "\n".join(lines)
 
 
 # =============================================================================
@@ -543,33 +736,9 @@ def pplx_auth_request_code(email: str) -> str:
     Returns:
         Status message indicating if the code was sent successfully
     """
-    from curl_cffi.requests import Session
-    from orjson import loads
-
-    BASE_URL = "https://www.perplexity.ai"
-
     try:
-        session = Session(impersonate="chrome", headers={"Referer": BASE_URL, "Origin": BASE_URL})
-        session.get(BASE_URL)
-        csrf_data = loads(session.get(f"{BASE_URL}/api/auth/csrf").content)
-        csrf = csrf_data.get("csrfToken")
-
-        if not csrf:
-            return "ERROR: Failed to obtain CSRF token. Please try again."
-
-        response = session.post(
-            f"{BASE_URL}/api/auth/signin/email?version=2.18&source=default",
-            json={
-                "email": email,
-                "csrfToken": csrf,
-                "useNumericOtp": "true",
-                "json": "true",
-                "callbackUrl": f"{BASE_URL}/?login-source=floatingSignup",
-            },
-        )
-
-        if response.status_code != 200:
-            return f"ERROR: Failed to send verification code. Status: {response.status_code}"
+        session, csrf = create_auth_session()
+        request_verification_code(session, csrf, email)
 
         _set_auth_session({"session": session, "email": email})
 
@@ -585,7 +754,7 @@ def pplx_auth_request_code(email: str) -> str:
 
 
 @mcp.tool
-def pplx_auth_complete(email: str, code: str) -> str:
+def pplx_auth_complete(email: str, code: str = "", totp_code: str | None = None) -> str:
     """Complete Perplexity authentication with the verification code.
 
     Use the 6-digit code received via email after calling pplx_auth_request_code.
@@ -594,50 +763,37 @@ def pplx_auth_complete(email: str, code: str) -> str:
     Args:
         email: Your Perplexity account email (same as used in pplx_auth_request_code)
         code: The 6-digit verification code from your email
+        totp_code: The 6-digit authenticator code when TOTP is enabled
 
     Returns:
         Status message with authentication result and subscription tier
     """
-    from curl_cffi.requests import Session
-    from orjson import loads
-
     from perplexity_web_mcp.cli.auth import get_user_info
-
-    BASE_URL = "https://www.perplexity.ai"
-    SESSION_COOKIE_NAME = "__Secure-next-auth.session-token"
 
     try:
         stored = _get_auth_session(email)
         if stored:
             session = stored["session"]
         else:
-            session = Session(impersonate="chrome", headers={"Referer": BASE_URL, "Origin": BASE_URL})
-            session.get(BASE_URL)
+            session, _ = create_auth_session()
 
-        response = session.post(
-            f"{BASE_URL}/api/auth/otp-redirect-link",
-            json={
-                "email": email,
-                "otp": code,
-                "redirectUrl": f"{BASE_URL}/?login-source=floatingSignup",
-                "emailLoginMethod": "web-otp",
-            },
-        )
+        challenge_token = stored.get("challenge_token") if stored else None
+        if challenge_token:
+            if not totp_code:
+                return "TOTP_REQUIRED: Call pplx_auth_complete again with email and totp_code."
+            verify_totp(session, challenge_token, totp_code)
+        else:
+            if not code:
+                return "ERROR: The 6-digit email verification code is required."
+            redirect_url = resolve_redirect_url(session, email, code)
+            challenge_token = follow_auth_callback(session, redirect_url)
+            if challenge_token:
+                _set_auth_session({"session": session, "email": email, "challenge_token": challenge_token})
+                if not totp_code:
+                    return "TOTP_REQUIRED: Call pplx_auth_complete again with email and totp_code."
+                verify_totp(session, challenge_token, totp_code)
 
-        if response.status_code != 200:
-            return "ERROR: Invalid verification code. Please check and try again."
-
-        redirect_path = loads(response.content).get("redirect")
-        if not redirect_path:
-            return "ERROR: No redirect URL received. Please try again."
-
-        redirect_url = f"{BASE_URL}{redirect_path}" if redirect_path.startswith("/") else redirect_path
-
-        session.get(redirect_url)
-        token = session.cookies.get(SESSION_COOKIE_NAME)
-
-        if not token:
-            return "ERROR: Authentication succeeded but token not found."
+        token = extract_session_token(session)
 
         if save_token(token):
             _clear_auth_session()

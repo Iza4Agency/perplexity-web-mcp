@@ -24,6 +24,7 @@ from perplexity_web_mcp.rate_limits import (
     RateLimits,
     SourceLimit,
     UserSettings,
+    _create_session,
     fetch_rate_limits,
     fetch_user_settings,
 )
@@ -33,6 +34,14 @@ from perplexity_web_mcp.token_store import load_token
 # ============================================================================
 # Fixtures: realistic API response payloads
 # ============================================================================
+
+
+def test_rate_limit_session_includes_perplexity_app_headers() -> None:
+    """REST helpers send the headers expected by Perplexity's web app."""
+    with _create_session("token") as session:
+        assert session.headers["x-app-apiclient"] == "default"
+        assert session.headers["x-app-apiversion"] == "2.18"
+        assert session.headers["Accept"] == "application/json"
 
 
 @pytest.fixture
@@ -414,6 +423,29 @@ class TestMcpUsageFormatting:
         assert "Billing: yearly (active)" in summary
 
 
+class TestMcpConnectorsFormatting:
+    """Test pplx_connectors source ID output."""
+
+    @patch("perplexity_web_mcp.mcp.server.get_limit_cache")
+    def test_pplx_connectors_lists_source_ids(self, mock_cache_fn: MagicMock) -> None:
+        from perplexity_web_mcp.mcp.server import pplx_connectors
+
+        mock_cache = MagicMock()
+        mock_cache.get_rate_limits.return_value = RateLimits(
+            source_limits=[
+                SourceLimit(source_id="web", monthly_limit=None, remaining=None),
+                SourceLimit(source_id="pitchbook_mcp_cashmere", monthly_limit=5, remaining=3),
+            ]
+        )
+        mock_cache_fn.return_value = mock_cache
+
+        summary = pplx_connectors.fn(refresh=False)
+
+        assert "pitchbook_mcp_cashmere" in summary
+        assert "3/5" in summary
+        mock_cache.get_rate_limits.assert_called_once_with(force_refresh=False)
+
+
 # ============================================================================
 # 5. ConnectorLimits
 # ============================================================================
@@ -635,9 +667,9 @@ class TestMCPServerHelpers:
 
         assert is_research_model(Models.DEEP_RESEARCH) is True
         assert is_research_model(Models.BEST) is False
-        assert is_research_model(Models.GPT_54) is False
-        assert is_research_model(Models.CLAUDE_46_SONNET) is False
-        assert is_research_model(Models.NEMOTRON_3_SUPER) is False
+        assert is_research_model(Models.GPT_56_TERRA) is False
+        assert is_research_model(Models.CLAUDE_50_SONNET) is False
+        assert is_research_model(Models.GLM_5_2) is False
         assert is_research_model(Models.SONAR) is False
         assert is_research_model(Models.GEMINI_31_PRO_THINKING) is False
 

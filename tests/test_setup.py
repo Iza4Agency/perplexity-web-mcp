@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from perplexity_web_mcp.cli.setup import (
     CLIENT_REGISTRY,
@@ -216,7 +216,7 @@ class TestSetupJsonClient:
 class TestSetupCommands:
     """Test Click-based setup commands via CliRunner."""
 
-    def _run(self, *args: str) -> object:
+    def _run(self, *args: str) -> Result:
         runner = CliRunner()
         return runner.invoke(setup, list(args))
 
@@ -357,10 +357,12 @@ class TestBackwardCompat:
         # Each item should have .name attribute
         assert all(hasattr(t, "name") for t in tools)
 
-    def test_is_configured_compat_codex(self) -> None:
+    @patch("perplexity_web_mcp.cli.setup._is_already_configured", return_value=False)
+    def test_is_configured_compat_codex(self, mock_configured: MagicMock) -> None:
         from perplexity_web_mcp.cli.setup import _get_tools, _is_configured_compat
 
         tools = _get_tools()
         codex_tool = next(t for t in tools if t.name == "codex")
-        # Codex is always False (skill-based)
+
         assert _is_configured_compat(codex_tool) is False
+        mock_configured.assert_called_once_with("codex")

@@ -8,18 +8,21 @@ Both the MCP server (mcp/server.py) and CLI (cli/main.py) import from here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from os import environ
+import re
 from threading import Lock
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from .config import ClientConfig, ConversationConfig
 from .core import Perplexity
-from .enums import CitationMode, SearchFocus, SourceFocus
+from .enums import CitationMode, LogLevel, SearchFocus, SourceFocus
 from .models import Model, Models
-from .rate_limits import RateLimitCache
+from .rate_limits import RateLimitCache, SourceLimit
 from .router import Intent, SmartResponse, SmartRouter
 from .sessions import SessionStore
 from .token_store import get_token_or_raise, load_token
+from .types import ThreadDetail, ThreadListEntry
 
 
 if TYPE_CHECKING:
@@ -45,17 +48,34 @@ class ModelDefinition:
     minimum_tier: SubscriptionMinimumTier = "pro"
     council_eligible: bool = True
 
-SOURCE_FOCUS_MAP: dict[str, list[SourceFocus]] = {
+
+SOURCE_FOCUS_ALIASES: dict[str, list[str]] = {
     "none": [],
-    "web": [SourceFocus.WEB],
-    "academic": [SourceFocus.ACADEMIC],
-    "social": [SourceFocus.SOCIAL],
-    "finance": [SourceFocus.FINANCE],
-    "all": [SourceFocus.WEB, SourceFocus.ACADEMIC, SourceFocus.SOCIAL],
+    "web": [SourceFocus.WEB.value],
+    "academic": [SourceFocus.ACADEMIC.value],
+    "social": [SourceFocus.SOCIAL.value],
+    "finance": [SourceFocus.FINANCE.value],
+    "all": [SourceFocus.WEB.value, SourceFocus.ACADEMIC.value, SourceFocus.SOCIAL.value],
+}
+SOURCE_FOCUS_MAP = SOURCE_FOCUS_ALIASES
+
+_CONNECTOR_ID_RE = re.compile(r"^[a-z][a-z0-9_]*_mcp_[a-z0-9_]*[a-z0-9]$")
+_BUILTIN_SOURCE_IDS = {
+    SourceFocus.WEB.value,
+    SourceFocus.ACADEMIC.value,
+    SourceFocus.SOCIAL.value,
+    SourceFocus.FINANCE.value,
+    "google_drive",
+    "box",
 }
 
+
+class SourceResolutionError(ValueError):
+    """Raised when a source alias or connector source ID cannot be resolved."""
+
+
 MODEL_METADATA: dict[str, ModelDefinition] = {
-    "auto": ModelDefinition(Models.BEST, None, "Auto (Best)", "Perplexity", council_eligible=False),
+    "auto": ModelDefinition(Models.AUTO, None, "Auto (Concise)", "Perplexity", council_eligible=False),
     "sonar": ModelDefinition(Models.SONAR, None, "Sonar 2", "Perplexity"),
     "deep_research": ModelDefinition(
         Models.DEEP_RESEARCH,
@@ -64,12 +84,24 @@ MODEL_METADATA: dict[str, ModelDefinition] = {
         "Perplexity",
         council_eligible=False,
     ),
-    "gpt54": ModelDefinition(Models.GPT_54, Models.GPT_54_THINKING, "GPT-5.4", "OpenAI"),
-    "gpt55": ModelDefinition(Models.GPT_55, Models.GPT_55_THINKING, "GPT-5.5", "OpenAI", minimum_tier="max"),
+    "gpt56_terra": ModelDefinition(
+        Models.GPT_56_TERRA,
+        Models.GPT_56_TERRA_THINKING,
+        "GPT-5.6 Terra",
+        "OpenAI",
+    ),
+    "gpt56_sol": ModelDefinition(
+        Models.GPT_56_SOL,
+        Models.GPT_56_SOL_THINKING,
+        "GPT-5.6 Sol",
+        "OpenAI",
+        minimum_tier="max",
+    ),
+    "grok45": ModelDefinition(Models.GROK_45, Models.GROK_45_THINKING, "Grok 4.5", "xAI"),
     "claude_sonnet": ModelDefinition(
-        Models.CLAUDE_46_SONNET,
-        Models.CLAUDE_46_SONNET_THINKING,
-        "Claude Sonnet 4.6",
+        Models.CLAUDE_50_SONNET,
+        Models.CLAUDE_50_SONNET_THINKING,
+        "Claude Sonnet 5",
         "Anthropic",
     ),
     "claude_opus": ModelDefinition(
@@ -91,6 +123,12 @@ MODEL_METADATA: dict[str, ModelDefinition] = {
         "Nemotron 3 Ultra",
         "NVIDIA",
     ),
+    "glm52": ModelDefinition(
+        Models.GLM_5_2,
+        Models.GLM_5_2,
+        "GLM 5.2",
+        "Z.ai",
+    ),
     "kimi_k26": ModelDefinition(Models.KIMI_K2_6, Models.KIMI_K2_6_THINKING, "Kimi K2.6", "Moonshot"),
 }
 """User-facing model metadata. Update this table when model names or tier availability changes."""
@@ -99,26 +137,26 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     name: (definition.base_model, definition.thinking_model) for name, definition in MODEL_METADATA.items()
 }
 
-SourceFocusName = Literal["none", "web", "academic", "social", "finance", "all"]
+SourceFocusName = str
 ModelName = Literal[
     "auto",
     "sonar",
     "deep_research",
-    "gpt54",
-    "gpt55",
+    "gpt56_terra",
+    "gpt56_sol",
+    "grok45",
     "claude_sonnet",
     "claude_opus",
     "gemini_pro",
     "nemotron",
+    "glm52",
     "kimi_k26",
 ]
 
 MODEL_NAMES: list[str] = list(MODEL_MAP.keys())
 SOURCE_FOCUS_NAMES: list[str] = list(SOURCE_FOCUS_MAP.keys())
 
-COUNCIL_DISPLAY_NAMES: dict[str, str] = {
-    name: definition.display_name for name, definition in MODEL_METADATA.items()
-}
+COUNCIL_DISPLAY_NAMES: dict[str, str] = {name: definition.display_name for name, definition in MODEL_METADATA.items()}
 
 THINKING_TOGGLEABLE: frozenset[str] = frozenset(
     name for name, (base, thinking) in MODEL_MAP.items() if thinking is not None and thinking is not base
@@ -132,7 +170,7 @@ COUNCIL_ELIGIBLE_MODEL_NAMES: tuple[str, ...] = tuple(
     name for name, definition in MODEL_METADATA.items() if definition.council_eligible
 )
 
-COUNCIL_DEFAULT_MODEL_NAMES: tuple[str, ...] = ("gpt54", "claude_sonnet", "gemini_pro")
+COUNCIL_DEFAULT_MODEL_NAMES: tuple[str, ...] = ("gpt56_terra", "claude_sonnet", "gemini_pro")
 COUNCIL_DEFAULT_MODELS_STR = ",".join(COUNCIL_DEFAULT_MODEL_NAMES)
 
 
@@ -166,6 +204,49 @@ def resolve_model(name: str, thinking: bool = False) -> Model:
     return thinking_model if thinking and thinking_model else base_model
 
 
+def _source_ids_from_limits() -> set[str]:
+    cache = get_limit_cache()
+    if cache is None:
+        return set()
+
+    limits = cache.get_rate_limits()
+    if limits is None:
+        return set()
+
+    return {source.source_id for source in limits.source_limits}
+
+
+def resolve_source_focus(source_focus: str) -> tuple[list[str], SearchFocus]:
+    """Resolve a built-in source alias or account connector source ID."""
+    source = (source_focus or "").strip() or "web"
+    if source in SOURCE_FOCUS_ALIASES:
+        search_focus = SearchFocus.WRITING if source == "none" else SearchFocus.WEB
+        return SOURCE_FOCUS_ALIASES[source], search_focus
+
+    # Check cheap lookups before making a network call.
+    if source in _BUILTIN_SOURCE_IDS or _CONNECTOR_ID_RE.fullmatch(source):
+        return [source], SearchFocus.WEB
+
+    if source in _source_ids_from_limits():
+        return [source], SearchFocus.WEB
+
+    available = ", ".join(SOURCE_FOCUS_NAMES)
+    raise SourceResolutionError(
+        f"Unknown source '{source}'. Available aliases: {available}. "
+        "Run `pwm connectors list` or `pwm usage` to find account connector source IDs."
+    )
+
+
+def get_connector_sources(source_limits: list[SourceLimit]) -> list[SourceLimit]:
+    """Return source limits that are account connectors, excluding builtin sources."""
+    return [
+        source
+        for source in source_limits
+        if ("_mcp_" in source.source_id or source.monthly_limit is not None)
+        and source.source_id not in _BUILTIN_SOURCE_IDS
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Cached Perplexity client (thread-safe, recreated on token change)
 # ---------------------------------------------------------------------------
@@ -173,6 +254,33 @@ def resolve_model(name: str, thinking: bool = False) -> Model:
 _client: Perplexity | None = None
 _client_token: str | None = None
 _client_lock = Lock()
+
+
+def _shared_client_config_from_env() -> ClientConfig:
+    """Build shared CLI/MCP client config from supported environment variables."""
+
+    log_level_raw = environ.get("LOG_LEVEL", "").strip().upper()
+    pwm_debug = environ.get("PWM_DEBUG", "").strip().lower()
+
+    logging_level = LogLevel.DISABLED
+    if pwm_debug in {"1", "true", "yes", "on"}:
+        logging_level = LogLevel.DEBUG
+    elif log_level_raw:
+        try:
+            logging_level = LogLevel(log_level_raw)
+        except ValueError:
+            logging_level = LogLevel.DISABLED
+
+    return ClientConfig(
+        rotate_fingerprint=False,
+        requests_per_second=0,
+        logging_level=logging_level,
+    )
+
+
+def _save_to_library_from_env() -> bool:
+    """Return whether shared CLI/MCP queries should be saved to the library."""
+    return environ.get("PWM_SAVE_TO_LIBRARY", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_client() -> Perplexity:
@@ -191,10 +299,7 @@ def get_client() -> Perplexity:
                     _client.close()
                 except Exception:
                     pass
-            config = ClientConfig(
-                rotate_fingerprint=False,
-                requests_per_second=0,
-            )
+            config = _shared_client_config_from_env()
             _client = Perplexity(token, config=config)
             _client_token = token
         return _client
@@ -275,7 +380,7 @@ _session_store = SessionStore()
 def _execute_query(
     query: str,
     model: Model,
-    sources: list[SourceFocus],
+    sources: list[str],
     search_focus: SearchFocus = SearchFocus.WEB,
     conversation_id: str | None = None,
 ) -> tuple[str, list[SearchResultItem], str | None]:
@@ -290,6 +395,7 @@ def _execute_query(
             citation_mode=CitationMode.DEFAULT,
             search_focus=search_focus,
             source_focus=sources,
+            save_to_library=_save_to_library_from_env(),
         )
     )
 
@@ -376,8 +482,7 @@ def _execute_with_retry(
     """Execute a query with automatic token retry on authentication failure."""
     from .exceptions import AuthenticationError, RateLimitError
 
-    sources = SOURCE_FOCUS_MAP.get(source_focus, [SourceFocus.WEB])
-    search_mode = SearchFocus.WRITING if source_focus == "none" else SearchFocus.WEB
+    sources, search_mode = resolve_source_focus(source_focus)
 
     try:
         return _execute_query(query, model, sources, search_mode, conversation_id)
@@ -446,10 +551,7 @@ def _format_error(error: Exception) -> str:
             token_status = "No token found"
         else:
             user_info = get_user_info(token)
-            if user_info:
-                token_status = f"Token valid for {user_info.email}"
-            else:
-                token_status = "Token exists but invalid"
+            token_status = f"valid for {user_info.email}" if user_info else "Token exists but invalid"
 
     limit_context = get_limit_context_for_error()
 
@@ -462,11 +564,21 @@ def _format_error(error: Exception) -> str:
         )
 
     if is_auth_error:
+        endpoint = getattr(error, "url", None)
+        endpoint_line = f"Failed endpoint: {endpoint}\n" if endpoint else ""
+        network_hint = ""
+        if token_status.startswith("valid for"):
+            network_hint = (
+                "Likely cause: token is valid, but the query endpoint returned 403. "
+                "Check network/IP/proxy/datacenter restrictions.\n"
+            )
         return (
             f"Error: Access forbidden (403).\n\n"
             f"Token status: {token_status}\n"
+            f"{endpoint_line}"
             f"Error type: {error_type}\n"
             f"Error details: {error_str}\n"
+            f"{network_hint}"
             f"{limit_context}\n"
             f"Re-authenticate with: pwm login\n"
             f"Or via MCP: pplx_auth_request_code -> pplx_auth_complete"
@@ -475,8 +587,138 @@ def _format_error(error: Exception) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Thread library (read-only, no quota cost)
+# ---------------------------------------------------------------------------
+
+
+def list_threads(
+    limit: int = 20,
+    offset: int = 0,
+    search_term: str = "",
+) -> list[ThreadListEntry]:
+    """Return a list of the user's Perplexity thread history entries.
+
+    Calls ``/rest/thread/list_ask_threads``.  Read-only — zero quota cost.
+
+    Args:
+        limit: Maximum threads to return (capped at 100).
+        offset: Pagination offset (skip this many threads).
+        search_term: Server-side keyword filter (title / content).
+
+    Returns:
+        List of ThreadListEntry domain models.
+
+    Raises:
+        AuthenticationError: If the session token is missing or invalid.
+    """
+    client = get_client()
+    return client.list_threads(limit=limit, offset=offset, search_term=search_term)
+
+
+def get_thread(slug: str) -> ThreadDetail:
+    """Return the full conversation history for a Perplexity thread by slug.
+
+    Calls ``/rest/thread/{slug}``.  Read-only — zero quota cost.
+
+    The slug is the thread UUID, available from:
+
+    * :func:`list_threads` (``slug`` field in each entry)
+    * The ``[Conversation ID: ...]`` footer appended to every query response
+
+    Args:
+        slug: Thread UUID / slug.
+
+    Returns:
+        ThreadDetail domain model representing the conversation history.
+
+    Raises:
+        AuthenticationError: If the session token is missing or invalid.
+    """
+    client = get_client()
+    return client.get_thread(slug)
+
+
+def format_thread_list(threads: list[ThreadListEntry]) -> str:
+    """Format a list of thread models into a readable string for agents/CLI output."""
+    if not threads:
+        return "No threads found."
+
+    lines: list[str] = [f"Found {len(threads)} thread(s):\n"]
+    for i, t in enumerate(threads, 1):
+        line = f"{i}. [{t.slug}] {t.title}"
+        if t.display_model:
+            line += f"  ({t.display_model})"
+        if t.last_query_datetime:
+            line += f"  · {t.last_query_datetime[:10]}"
+        if t.query_count > 1:
+            line += f"  · {t.query_count} turns"
+        lines.append(line)
+
+        preview = t.answer_preview[:120].replace("\n", " ").strip()
+        if preview:
+            if len(t.answer_preview) > 120:
+                preview += "…"
+            lines.append(f"   Preview: {preview}")
+        lines.append("")
+
+    lines.append(
+        "Use pplx_get_thread(slug) to read the full conversation,\n"
+        "or pass the slug as conversation_id to any pplx_* query tool to resume."
+    )
+    return "\n".join(lines)
+
+
+def format_thread_detail(t: ThreadDetail) -> str:
+    """Format a full thread detail model into a readable Markdown string."""
+    lines: list[str] = [f"# {t.title}\n"]
+
+    if t.slug:
+        lines.append(f"**Thread ID (slug):** `{t.slug}`")
+    if t.created_at:
+        lines.append(f"**Created:** {t.created_at[:10]}")
+    lines.append("")
+
+    if not t.turns:
+        lines.append("*(No conversation turns found in this thread.)*")
+        return "\n".join(lines)
+
+    for i, turn in enumerate(t.turns, 1):
+        turn_header = f"## Turn {i}"
+        if turn.display_model:
+            turn_header += f" · {turn.display_model}"
+        if turn.created_at:
+            turn_header += f" · {turn.created_at[:10]}"
+        lines.append(turn_header)
+
+        if turn.query_str:
+            lines.append(f"\n**Q:** {turn.query_str}\n")
+
+        if turn.answer:
+            lines.append(f"**A:**\n\n{turn.answer}\n")
+
+        if turn.sources:
+            lines.append("**Sources:**")
+            for src in turn.sources:
+                lines.append(f"- [{src.title}]({src.url})")
+            lines.append("")
+
+        if turn.related_queries:
+            lines.append("**Related queries:**")
+            for rq in turn.related_queries:
+                lines.append(f"- {rq}")
+            lines.append("")
+
+    slug_for_resume = t.slug or "(use slug from pplx_list_threads)"
+    lines.append(
+        f'---\n*To resume this conversation, pass* `conversation_id="{slug_for_resume}"` *to any pplx_\\* query tool.*'
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Smart ask (quota-aware routing)
 # ---------------------------------------------------------------------------
+
 
 _router = SmartRouter()
 
@@ -535,7 +777,7 @@ def council_ask(
     Args:
         query: The question to ask all models.
         models: List of (display_name, Model) tuples. Defaults to
-                GPT-5.4, Claude Opus 4.8, and Gemini 3.1 Pro.
+                GPT-5.6 Terra, Claude Opus 4.8, and Gemini 3.1 Pro.
         source_focus: Source focus for all queries.
         synthesize: Whether to run Sonar 2 synthesis (default chairman; still a web query).
         thinking: Use thinking model variants for default council members.

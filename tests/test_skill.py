@@ -86,9 +86,12 @@ class TestIsToolInstalled:
 
     def test_detected_via_binary_on_path(self) -> None:
         target = SkillTarget(
-            name="fake-tool", description="T",
-            user_dir=Path("/nonexistent/skills"), project_dir=".fake/skills",
-            binary="python3", root_dirs=[],
+            name="fake-tool",
+            description="T",
+            user_dir=Path("/nonexistent/skills"),
+            project_dir=".fake/skills",
+            binary="python3",
+            root_dirs=[],
         )
         assert _is_tool_installed(target) is True
 
@@ -96,16 +99,21 @@ class TestIsToolInstalled:
         root = tmp_path / ".fake-tool"
         root.mkdir()
         target = SkillTarget(
-            name="fake-tool", description="T",
-            user_dir=tmp_path / ".fake-tool" / "skills", project_dir=".fake/skills",
-            binary="definitely-not-a-real-binary-xyz", root_dirs=[root],
+            name="fake-tool",
+            description="T",
+            user_dir=tmp_path / ".fake-tool" / "skills",
+            project_dir=".fake/skills",
+            binary="definitely-not-a-real-binary-xyz",
+            root_dirs=[root],
         )
         assert _is_tool_installed(target) is True
 
     def test_not_detected_when_neither_signal(self) -> None:
         target = SkillTarget(
-            name="fake-tool", description="T",
-            user_dir=Path("/nonexistent/skills"), project_dir=".fake/skills",
+            name="fake-tool",
+            description="T",
+            user_dir=Path("/nonexistent/skills"),
+            project_dir=".fake/skills",
             binary="definitely-not-a-real-binary-xyz",
             root_dirs=[Path("/nonexistent/root")],
         )
@@ -115,16 +123,20 @@ class TestIsToolInstalled:
         root = tmp_path / ".tool-config"
         root.mkdir()
         target = SkillTarget(
-            name="fake-tool", description="T",
-            user_dir=tmp_path / ".tool-config" / "skills", project_dir=".fake/skills",
+            name="fake-tool",
+            description="T",
+            user_dir=tmp_path / ".tool-config" / "skills",
+            project_dir=".fake/skills",
             root_dirs=[root],
         )
         assert _is_tool_installed(target) is True
 
     def test_empty_root_dirs_and_no_binary(self) -> None:
         target = SkillTarget(
-            name="other", description="Export",
-            user_dir=Path.home(), project_dir=".",
+            name="other",
+            description="Export",
+            user_dir=Path.home(),
+            project_dir=".",
         )
         assert _is_tool_installed(target) is False
 
@@ -253,7 +265,7 @@ class TestCmdSkill:
         skill_dir = tmp_path / SKILL_DIR_NAME
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("# My Skill Content")
-        mock_source.return_value = skill_dir
+        mock_source.return_value = skill_dir  # type: ignore
 
         assert cmd_skill(["show"]) == 0
         assert "My Skill Content" in capsys.readouterr().out

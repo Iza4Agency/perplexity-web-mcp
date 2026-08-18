@@ -9,6 +9,6 @@ __all__: list[str] = ["run_server"]
 def run_server() -> None:
     """Run the MCP server."""
 
-    from .server import main  # noqa: PLC0415
+    from .server import main
 
     main()

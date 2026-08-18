@@ -7,15 +7,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from perplexity_web_mcp import shared
+from perplexity_web_mcp.enums import LogLevel
 from perplexity_web_mcp.exceptions import AuthenticationError, RateLimitError
 from perplexity_web_mcp.models import Model, Models
-from perplexity_web_mcp.rate_limits import RateLimits
+from perplexity_web_mcp.rate_limits import RateLimits, SourceLimit
 from perplexity_web_mcp.router import SmartResponse
 from perplexity_web_mcp.shared import (
     MODEL_MAP,
     MODEL_NAMES,
     SOURCE_FOCUS_MAP,
     SOURCE_FOCUS_NAMES,
+    _format_error,
     ask,
     resolve_model,
     smart_ask,
@@ -35,12 +37,14 @@ class TestMappings:
             "auto",
             "sonar",
             "deep_research",
-            "gpt54",
-            "gpt55",
+            "gpt56_terra",
+            "gpt56_sol",
+            "grok45",
             "claude_sonnet",
             "claude_opus",
             "gemini_pro",
             "nemotron",
+            "glm52",
             "kimi_k26",
         }
         assert set(MODEL_MAP.keys()) == expected
@@ -74,35 +78,78 @@ class TestMappings:
         assert set(shared.MODEL_METADATA) == set(MODEL_MAP)
 
     def test_default_council_is_pro_compatible(self) -> None:
-        assert getattr(shared, "COUNCIL_DEFAULT_MODEL_NAMES", None) == ("gpt54", "claude_sonnet", "gemini_pro")
-        assert getattr(shared, "COUNCIL_DEFAULT_MODELS_STR", None) == "gpt54,claude_sonnet,gemini_pro"
+        assert getattr(shared, "COUNCIL_DEFAULT_MODEL_NAMES", None) == (
+            "gpt56_terra",
+            "claude_sonnet",
+            "gemini_pro",
+        )
+        assert getattr(shared, "COUNCIL_DEFAULT_MODELS_STR", None) == "gpt56_terra,claude_sonnet,gemini_pro"
         assert not set(shared.COUNCIL_DEFAULT_MODEL_NAMES) & shared.MAX_ONLY_MODEL_NAMES
 
     def test_max_only_model_names_come_from_metadata(self) -> None:
-        assert getattr(shared, "MAX_ONLY_MODEL_NAMES", None) == {"gpt55", "claude_opus"}
+        assert getattr(shared, "MAX_ONLY_MODEL_NAMES", None) == {"gpt56_sol", "claude_opus"}
         assert all(shared.MODEL_METADATA[name].minimum_tier == "max" for name in shared.MAX_ONLY_MODEL_NAMES)
 
     def test_council_eligible_models_are_derived_from_metadata(self) -> None:
         assert getattr(shared, "COUNCIL_ELIGIBLE_MODEL_NAMES", None) == (
             "sonar",
-            "gpt54",
-            "gpt55",
+            "gpt56_terra",
+            "gpt56_sol",
+            "grok45",
             "claude_sonnet",
             "claude_opus",
             "gemini_pro",
             "nemotron",
+            "glm52",
             "kimi_k26",
         )
 
     def test_build_council_model_list_uses_metadata_display_names(self) -> None:
         assert hasattr(shared, "build_council_model_list")
-        models = shared.build_council_model_list(("sonar", "gpt54", "claude_sonnet"))
-        assert [name for name, _ in models] == ["Sonar 2", "GPT-5.4", "Claude Sonnet 4.6"]
+        models = shared.build_council_model_list(("sonar", "gpt56_terra", "claude_sonnet"))
+        assert [name for name, _ in models] == ["Sonar 2", "GPT-5.6 Terra", "Claude Sonnet 5"]
         assert [model for _, model in models] == [
             Models.SONAR,
-            Models.GPT_54,
-            Models.CLAUDE_46_SONNET,
+            Models.GPT_56_TERRA,
+            Models.CLAUDE_50_SONNET,
         ]
+
+
+class TestResolveSourceFocus:
+    """Verify source aliases and connector source IDs resolve safely."""
+
+    def test_builtin_aliases_resolve_to_payload_source_ids(self) -> None:
+        assert shared.resolve_source_focus("none") == ([], shared.SearchFocus.WRITING)
+        assert shared.resolve_source_focus("web") == (["web"], shared.SearchFocus.WEB)
+        assert shared.resolve_source_focus("academic") == (["scholar"], shared.SearchFocus.WEB)
+        assert shared.resolve_source_focus("social") == (["social"], shared.SearchFocus.WEB)
+        assert shared.resolve_source_focus("finance") == (["edgar"], shared.SearchFocus.WEB)
+        assert shared.resolve_source_focus("all") == (["web", "scholar", "social"], shared.SearchFocus.WEB)
+
+    def test_connector_id_from_rate_limits_is_accepted(self) -> None:
+        cache = MagicMock()
+        cache.get_rate_limits.return_value = RateLimits(
+            source_limits=[
+                SourceLimit(source_id="pitchbook_mcp_cashmere", monthly_limit=5, remaining=3),
+            ]
+        )
+        with patch("perplexity_web_mcp.shared.get_limit_cache", return_value=cache):
+            sources, search_focus = shared.resolve_source_focus("pitchbook_mcp_cashmere")
+
+        assert sources == ["pitchbook_mcp_cashmere"]
+        assert search_focus is shared.SearchFocus.WEB
+
+    def test_connector_like_id_is_accepted_when_limits_unavailable(self) -> None:
+        with patch("perplexity_web_mcp.shared.get_limit_cache", return_value=None):
+            sources, search_focus = shared.resolve_source_focus("crunchbase_mcp_cashmere")
+
+        assert sources == ["crunchbase_mcp_cashmere"]
+        assert search_focus is shared.SearchFocus.WEB
+
+    def test_unknown_source_raises_instead_of_falling_back_to_web(self) -> None:
+        with patch("perplexity_web_mcp.shared.get_limit_cache", return_value=None):
+            with pytest.raises(shared.SourceResolutionError, match="Unknown source"):
+                shared.resolve_source_focus("badvalue")
 
 
 # ============================================================================
@@ -114,23 +161,27 @@ class TestResolveModel:
     """Test resolve_model with various inputs."""
 
     def test_auto_returns_best(self) -> None:
-        assert resolve_model("auto") is Models.BEST
+        assert resolve_model("auto") is Models.AUTO
 
     def test_auto_thinking_still_returns_best(self) -> None:
         # auto has no thinking variant (None)
-        assert resolve_model("auto", thinking=True) is Models.BEST
+        assert resolve_model("auto", thinking=True) is Models.AUTO
 
     def test_nemotron_base(self) -> None:
-        assert resolve_model("nemotron") is Models.NEMOTRON_3_SUPER
+        assert resolve_model("nemotron") is Models.NEMOTRON_3_ULTRA
 
     def test_nemotron_thinking(self) -> None:
-        assert resolve_model("nemotron", thinking=True) is Models.NEMOTRON_3_SUPER
+        assert resolve_model("nemotron", thinking=True) is Models.NEMOTRON_3_ULTRA
 
     def test_claude_sonnet_base(self) -> None:
-        assert resolve_model("claude_sonnet") is Models.CLAUDE_46_SONNET
+        assert resolve_model("claude_sonnet") is Models.CLAUDE_50_SONNET
 
     def test_claude_sonnet_thinking(self) -> None:
-        assert resolve_model("claude_sonnet", thinking=True) is Models.CLAUDE_46_SONNET_THINKING
+        assert resolve_model("claude_sonnet", thinking=True) is Models.CLAUDE_50_SONNET_THINKING
+
+    def test_glm52_always_thinking(self) -> None:
+        assert resolve_model("glm52") is Models.GLM_5_2
+        assert resolve_model("glm52", thinking=True) is Models.GLM_5_2
 
     def test_gemini_pro_always_thinking(self) -> None:
         # gemini_pro has no non-thinking variant
@@ -139,8 +190,8 @@ class TestResolveModel:
 
     def test_nemotron_always_thinking(self) -> None:
         # nemotron is reasoning-only, always thinking
-        assert resolve_model("nemotron") is Models.NEMOTRON_3_SUPER
-        assert resolve_model("nemotron", thinking=True) is Models.NEMOTRON_3_SUPER
+        assert resolve_model("nemotron") is Models.NEMOTRON_3_ULTRA
+        assert resolve_model("nemotron", thinking=True) is Models.NEMOTRON_3_ULTRA
 
     def test_unknown_model_falls_back_to_best(self) -> None:
         assert resolve_model("nonexistent") is Models.BEST
@@ -166,6 +217,22 @@ class TestResolveModel:
 
 class TestAsk:
     """Test the shared ask() function with mocked Perplexity client."""
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_SAVE_TO_LIBRARY": "1"}, clear=True)
+    @patch("perplexity_web_mcp.shared.check_limits_before_query", return_value=None)
+    @patch("perplexity_web_mcp.shared.get_limit_cache", return_value=None)
+    @patch("perplexity_web_mcp.shared.get_client")
+    def test_save_to_library_env_reaches_conversation_config(
+        self, mock_client_fn: MagicMock, mock_cache: MagicMock, mock_limits: MagicMock
+    ) -> None:
+        mock_conv = MagicMock(answer="Saved answer", search_results=[], uuid=None)
+        mock_client = MagicMock()
+        mock_client.create_conversation.return_value = mock_conv
+        mock_client_fn.return_value = mock_client
+
+        assert ask("question", Models.BEST) == "Saved answer"
+        config = mock_client.create_conversation.call_args.args[0]
+        assert config.save_to_library is True
 
     @patch("perplexity_web_mcp.shared.check_limits_before_query", return_value=None)
     @patch("perplexity_web_mcp.shared.get_limit_cache", return_value=None)
@@ -443,6 +510,67 @@ class TestAskErrorPropagation:
         result = ask("question", Models.BEST)
         assert isinstance(result, str)
         assert "Network failure" in result
+
+
+class TestSharedClientConfig:
+    """Verify CLI query clients honor debug environment variables."""
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_SAVE_TO_LIBRARY": "yes"}, clear=True)
+    def test_save_to_library_env_flag_is_enabled(self) -> None:
+        assert shared._save_to_library_from_env() is True
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_SAVE_TO_LIBRARY": "0"}, clear=True)
+    def test_save_to_library_env_flag_defaults_to_disabled(self) -> None:
+        assert shared._save_to_library_from_env() is False
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"LOG_LEVEL": "debug"}, clear=True)
+    @patch("perplexity_web_mcp.shared.Perplexity")
+    @patch("perplexity_web_mcp.shared.get_token_or_raise", return_value="token")
+    def test_log_level_env_enables_debug_logging(self, mock_token: MagicMock, mock_perplexity: MagicMock) -> None:
+        shared.reset_client()
+        shared.get_client()
+
+        config = mock_perplexity.call_args.kwargs["config"]
+        assert config.logging_level is LogLevel.DEBUG
+
+    @patch.dict("perplexity_web_mcp.shared.environ", {"PWM_DEBUG": "1"}, clear=True)
+    @patch("perplexity_web_mcp.shared.Perplexity")
+    @patch("perplexity_web_mcp.shared.get_token_or_raise", return_value="token")
+    def test_pwm_debug_env_enables_debug_logging(self, mock_token: MagicMock, mock_perplexity: MagicMock) -> None:
+        shared.reset_client()
+        shared.get_client()
+
+        config = mock_perplexity.call_args.kwargs["config"]
+        assert config.logging_level is LogLevel.DEBUG
+
+
+class TestErrorFormatting:
+    """Verify 403 messages distinguish token and endpoint failures."""
+
+    @patch("perplexity_web_mcp.cli.auth.get_user_info")
+    @patch("perplexity_web_mcp.shared.load_token", return_value="token")
+    @patch("perplexity_web_mcp.shared.get_limit_context_for_error", return_value="")
+    def test_valid_token_403_points_to_endpoint_and_network(
+        self,
+        mock_limit_context: MagicMock,
+        mock_load_token: MagicMock,
+        mock_user_info_fn: MagicMock,
+    ) -> None:
+        mock_user_info = MagicMock()
+        mock_user_info.email = "user@example.com"
+        mock_user_info_fn.return_value = mock_user_info
+
+        err = AuthenticationError(
+            "GET /search/new returned 403 Forbidden.",
+            url="https://www.perplexity.ai/search/new?q=test",
+            response_body="forbidden",
+        )
+
+        message = _format_error(err)
+
+        assert "Token status: valid for user@example.com" in message
+        assert "Failed endpoint: https://www.perplexity.ai/search/new?q=test" in message
+        assert "network/IP/proxy/datacenter" in message
 
 
 class TestSmartAskErrorPropagation:

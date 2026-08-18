@@ -9,7 +9,6 @@
 [![Total downloads](https://static.pepy.tech/badge/perplexity-web-mcp-cli)](https://pepy.tech/projects/perplexity-web-mcp-cli)
 [![Python](https://img.shields.io/pypi/pyversions/perplexity-web-mcp-cli)](https://pypi.org/project/perplexity-web-mcp-cli/)
 [![License](https://img.shields.io/pypi/l/perplexity-web-mcp-cli)](https://github.com/jacob-bd/perplexity-web-mcp/blob/main/LICENSE)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/jacobbd)
 
 <p align="center">
   <a href="https://youtu.be/9xyClDvmoZ0">
@@ -25,14 +24,14 @@
 
 MCP server, CLI, and API-compatible interface for Perplexity AI's web interface.
 
-Use your Perplexity Pro/Max subscription to access premium models (GPT-5.4, Claude 4.6 Opus, Claude 4.6 Sonnet, Gemini 3.1 Pro, Nemotron 3 Ultra) from the terminal, through MCP tools, or as an API endpoint.
+Use your Perplexity Pro/Max subscription to access premium models (Sonar 2, GPT-5.6 Terra, GPT-5.6 Sol, Gemini 3.1 Pro, Claude Sonnet 5, Claude Opus 4.8, GLM 5.2, Kimi K2.6, Grok 4.5, and Nemotron 3 Ultra) from the terminal, through MCP tools, or as an API endpoint.
 
 ## Features
 
 - **CLI**: Query Perplexity models directly from the terminal (`pwm ask`, `pwm council`, `pwm research`, `pwm chat`)
-- **MCP Server**: 17 MCP tools for AI agents with citations, rate limit checking, and multi-turn context
+- **MCP Server**: MCP tools for AI agents with citations, rate limit checking, and multi-turn context
 - **API Server**: Drop-in Anthropic Messages API and OpenAI Chat Completions API
-- **6 Models**: GPT-5.4, Claude 4.6 Opus, Claude 4.6 Sonnet, Gemini 3.1 Pro, Nemotron 3 Ultra, Sonar 2
+- **10 Models**: Sonar 2, GPT-5.6 Terra, GPT-5.6 Sol, Gemini 3.1 Pro, Claude Sonnet 5, Claude Opus 4.8, GLM 5.2, Kimi K2.6, Grok 4.5, and Nemotron 3 Ultra
 - **Thinking Mode**: Extended thinking support for all compatible models
 - **Deep Research**: Full support for Perplexity's Deep Research mode
 - **Multi-Turn Conversations**: State-preserved threaded conversations for both MCP and CLI REPL
@@ -137,7 +136,7 @@ pwm ask "What is quantum computing?"
 **Choose a specific model** with `-m` (see [Models](#models) for the full list):
 
 ```bash
-pwm ask "Compare React and Vue" -m gpt54
+pwm ask "Compare React and Vue" -m gpt56_terra
 ```
 
 ```bash
@@ -164,6 +163,10 @@ pwm ask "Apple revenue Q4 2025" -s finance
 
 # Search all source types at once
 pwm ask "latest AI news" -s all
+
+# Search an account connector source, when your Perplexity account exposes one
+pwm connectors list
+pwm ask "recent funding for Stripe" -s pitchbook_mcp_cashmere
 ```
 
 **Output options:**
@@ -203,13 +206,13 @@ pwm research "NVIDIA competitive landscape" -s finance --json
 Query multiple models in parallel and get a synthesized consensus. Each model costs 1 Pro Search. Default synthesis uses Sonar 2 (also 1 Pro Search).
 
 ```bash
-# Default: GPT-5.4, Claude Sonnet, Gemini Pro + Sonar 2 synthesis (4 Pro Searches)
+# Default: GPT-5.6 Terra, Claude Sonnet, Gemini Pro + Sonar 2 synthesis (4 Pro Searches)
 pwm council "What are best practices for microservices?"
 ```
 
 ```bash
 # Custom model selection
-pwm council "Compare Rust and Go" -m gpt54,claude_sonnet
+pwm council "Compare Rust and Go" -m gpt56_terra,claude_sonnet
 ```
 
 ```bash
@@ -229,7 +232,11 @@ pwm login                                    # Interactive login (email + OTP)
 pwm login --check                            # Check if authenticated
 pwm login --email user@example.com           # Send verification code (non-interactive)
 pwm login --email user@example.com --code 123456  # Complete auth with code
+pwm login --email user@example.com --code 123456 --totp-code 654321  # Account with TOTP enabled
 ```
+
+Set `PWM_SAVE_TO_LIBRARY=1` to save shared CLI and MCP queries to the Perplexity thread library. Queries are
+incognito by default.
 
 ### Usage & Limits
 
@@ -244,7 +251,7 @@ Seamlessly launch external AI tools connected to the Perplexity API server. This
 
 ```bash
 pwm hack claude            # Launch Claude Code
-pwm hack claude -m gpt54   # Launch Claude Code with a specific model
+pwm hack claude -m gpt56_terra   # Launch Claude Code with a specific model
 ```
 
 ### MCP Setup
@@ -291,28 +298,45 @@ pwm --ai                   # Print comprehensive AI-optimized reference
 
 ## Models
 
-| CLI Name | Provider | Thinking | Notes |
-|----------|----------|----------|-------|
-| `auto` | Perplexity | No | Auto-selects best model |
-| `sonar` | Perplexity | No | Sonar 2 (latest in-house; API id `experimental`) |
-| `deep_research` | Perplexity | No | Monthly quota, in-depth reports |
-| `gpt54` | OpenAI | Toggle | GPT-5.4 |
-| `claude_sonnet` | Anthropic | Toggle | Claude 4.6 Sonnet |
-| `claude_opus` | Anthropic | Toggle | Claude 4.6 Opus (Max tier required) |
-| `gemini_pro` | Google | Always | Gemini 3.1 Pro |
-| `nemotron` | NVIDIA | Always | Nemotron 3 Ultra 550B |
+| CLI Name        | Provider   | Thinking | Notes                                            |
+| --------------- | ---------- | -------- | ------------------------------------------------ |
+| `auto`          | Perplexity | No       | Auto-selects best model                          |
+| `sonar`         | Perplexity | No       | Sonar 2 (latest in-house; API id `experimental`) |
+| `deep_research` | Perplexity | No       | Monthly quota, in-depth reports                  |
+| `gpt56_terra`   | OpenAI     | Toggle   | GPT-5.6 Terra                                    |
+| `gpt56_sol`     | OpenAI     | Toggle   | GPT-5.6 Sol (Max tier required)                  |
+| `grok45`        | xAI        | Toggle   | Grok 4.5                                         |
+| `claude_sonnet` | Anthropic  | Toggle   | Claude Sonnet 5                                |
+| `claude_opus`   | Anthropic  | Toggle   | Claude Opus 4.8 (Max tier required)              |
+| `gemini_pro`    | Google     | Always   | Gemini 3.1 Pro                                   |
+| `nemotron`      | NVIDIA     | Always   | Nemotron 3 Ultra 550B                            |
+| `glm52`         | Z.ai       | Always   | GLM 5.2                                          |
+| `kimi_k26`      | Moonshot   | Toggle   | Kimi K2.6                                        |
 
 ### Source Focus
 
 Control where Perplexity searches using `-s` (CLI) or `source_focus` (MCP):
 
-| Option | Description | Example Use Case |
-|--------|-------------|------------------|
-| `web` | General web search (default) | News, general questions |
-| `academic` | Academic papers, journals | Research, citations, scientific topics |
-| `social` | Reddit, Twitter, forums | Opinions, recommendations, community sentiment |
-| `finance` | SEC EDGAR filings | Company financials, regulatory filings |
-| `all` | Web + Academic + Social combined | Broad coverage across all sources |
+| Option     | Description                      | Example Use Case                               |
+| ---------- | -------------------------------- | ---------------------------------------------- |
+| `web`      | General web search (default)     | News, general questions                        |
+| `academic` | Academic papers, journals        | Research, citations, scientific topics         |
+| `social`   | Reddit, Twitter, forums          | Opinions, recommendations, community sentiment |
+| `finance`  | SEC EDGAR filings                | Company financials, regulatory filings         |
+| `all`      | Web + Academic + Social combined | Broad coverage across all sources              |
+
+### Account Connector Sources
+
+Accounts with Perplexity connectors may expose additional source IDs such as `pitchbook_mcp_cashmere` or `cbinsights_mcp_cashmere`. List IDs before using them:
+
+```bash
+pwm connectors list
+pwm ask "recent funding for Stripe" -s pitchbook_mcp_cashmere
+```
+
+MCP clients should call `pplx_connectors()` first, then pass the returned ID as `source_focus`.
+
+Connector access depends on the authenticated Perplexity account. Free accounts may show no connector IDs. Unknown source values fail instead of falling back to web search. See [Account Connector Sources](docs/connectors.md) for details.
 
 ---
 
@@ -329,11 +353,13 @@ pwm setup add claude-code
 Or configure manually for any MCP client:
 
 **Claude Code CLI:**
+
 ```bash
 claude mcp add perplexity pwm-mcp
 ```
 
 **Claude Desktop** — Download the `.mcpb` extension from the [latest release](https://github.com/jacob-bd/perplexity-web-mcp/releases/latest) and open it with Claude Desktop. Or configure manually:
+
 ```json
 {
   "mcpServers": {
@@ -345,6 +371,7 @@ claude mcp add perplexity pwm-mcp
 ```
 
 **Cursor** (`~/.cursor/mcp.json`):
+
 ```json
 {
   "mcpServers": {
@@ -357,42 +384,47 @@ claude mcp add perplexity pwm-mcp
 
 ### Available MCP Tools
 
-**Query tools (12):**
+**Query tools:**
 
-| Tool | Description |
-|------|-------------|
-| `pplx_query` | Flexible: model selection + thinking toggle |
-| `pplx_ask` | Quick Q&A (auto-selects best model) |
-| `pplx_deep_research` | In-depth reports with sources |
-| `pplx_sonar` | Perplexity Sonar 2 (1 Pro Search) |
-| `pplx_gpt54` / `pplx_gpt54_thinking` | GPT-5.4 |
-| `pplx_claude_sonnet` / `pplx_claude_sonnet_think` | Claude 4.6 Sonnet |
-| `pplx_claude_opus` / `pplx_claude_opus_think` | Claude 4.6 Opus (Max tier) |
-| `pplx_gemini_pro_think` | Gemini 3.1 Pro (thinking always on) |
-| `pplx_nemotron_thinking` | Nemotron 3 Ultra (thinking always on) |
+| Tool                                              | Description                                 |
+| ------------------------------------------------- | ------------------------------------------- |
+| `pplx_query`                                      | Flexible: model selection + thinking toggle |
+| `pplx_ask`                                        | Quick Q&A (auto-selects best model)         |
+| `pplx_deep_research`                              | In-depth reports with sources               |
+| `pplx_sonar`                                      | Perplexity Sonar 2 (1 Pro Search)           |
+| `pplx_gpt56_terra` / `pplx_gpt56_terra_thinking`              | GPT-5.6 Terra                                     |
+| `pplx_gpt56_sol` / `pplx_gpt56_sol_thinking`              | GPT-5.6 Sol (Max tier)                          |
+| `pplx_grok45` / `pplx_grok45_thinking`                    | Grok 4.5                                        |
+| `pplx_claude_sonnet` / `pplx_claude_sonnet_think` | Claude Sonnet 5                           |
+| `pplx_claude_opus` / `pplx_claude_opus_think`     | Claude Opus 4.8 (Max tier)                  |
+| `pplx_gemini_pro_think`                           | Gemini 3.1 Pro (thinking always on)         |
+| `pplx_nemotron_thinking`                          | Nemotron 3 Ultra (thinking always on)       |
+| `pplx_glm52`                                      | GLM 5.2 (thinking always on)                |
+| `pplx_kimi_k26` / `pplx_kimi_k26_thinking`         | Kimi K2.6                                   |
 
 **Smart routing (1):**
 
-| Tool | Description |
-|------|-------------|
+| Tool               | Description                                                   |
+| ------------------ | ------------------------------------------------------------- |
 | `pplx_smart_query` | Quota-aware routing — auto-selects best model based on limits |
 
 **Council (1):**
 
-| Tool | Description |
-|------|-------------|
+| Tool           | Description                                               |
+| -------------- | --------------------------------------------------------- |
 | `pplx_council` | Query multiple models in parallel with optional synthesis |
 
-**Usage & auth tools (4):**
+**Usage, connectors & auth tools (5):**
 
-| Tool | Description |
-|------|-------------|
-| `pplx_usage` | Check remaining quotas |
-| `pplx_auth_status` | Check authentication status |
+| Tool                     | Description                     |
+| ------------------------ | ------------------------------- |
+| `pplx_usage`             | Check remaining quotas          |
+| `pplx_connectors`        | List connector source IDs       |
+| `pplx_auth_status`       | Check authentication status     |
 | `pplx_auth_request_code` | Send verification code to email |
-| `pplx_auth_complete` | Complete auth with 6-digit code |
+| `pplx_auth_complete`     | Complete email and TOTP authentication |
 
-All query tools support `source_focus`: `none`, `web`, `academic`, `social`, `finance`, `all`.
+All query tools support `source_focus`: `none`, `web`, `academic`, `social`, `finance`, `all`, or a connector source ID returned by `pplx_connectors()`.
 
 ---
 
@@ -411,7 +443,7 @@ pwm api
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080
 export ANTHROPIC_API_KEY=perplexity
-claude --model gpt-5.4
+claude --model gpt-5.6-terra
 ```
 
 Alternatively, launch Claude Code seamlessly using the `hack` command, which automatically starts the API server and configures the environment for you:
@@ -440,18 +472,21 @@ export OPENAI_API_KEY=dummy
 codex -m sonar --local-provider lmstudio
 ```
 
-Our server's `MODEL_MAP` will seamlessly intercept `sonar` (or any other mapped names like `gemini-pro`, `nemotron`, `claude-sonnet-4-6`) and correctly route it to Perplexity's API. You can also create an alias in your shell to make this easier: `alias codex-pplx="codex --local-provider lmstudio"`.
+Our server's `MODEL_MAP` will seamlessly intercept `sonar` (or any other mapped names like `gemini-pro`, `nemotron`, `glm-5.2`, `claude-sonnet-5`) and correctly route it to Perplexity's API. You can also create an alias in your shell to make this easier: `alias codex-pplx="codex --local-provider lmstudio"`.
 
 ### API Model Names
 
-| API Name | Perplexity Model | Thinking |
-|----------|------------------|----------|
-| `perplexity-auto` | Best (auto-select) | No |
-| `gpt-5.4` | GPT-5.4 | Toggle |
-| `claude-sonnet-4-6` | Claude 4.6 Sonnet | Toggle |
-| `claude-opus-4-6` | Claude 4.6 Opus | Toggle |
-| `gemini-3.1-pro` | Gemini 3.1 Pro | Always |
-| `nemotron-3-ultra` / `nemotron` | Nemotron 3 Ultra | Always |
+| API Name                        | Perplexity Model   | Thinking |
+| ------------------------------- | ------------------ | -------- |
+| `perplexity-auto`               | Best (auto-select) | No       |
+| `gpt-5.6-terra`                 | GPT-5.6 Terra      | Toggle   |
+| `gpt-5.6-sol`                   | GPT-5.6 Sol        | Toggle   |
+| `grok-4.5`                      | Grok 4.5           | Toggle   |
+| `claude-sonnet-5`               | Claude Sonnet 5    | Toggle   |
+| `claude-opus-4-8`               | Claude Opus 4.8    | Toggle   |
+| `gemini-3.1-pro`                | Gemini 3.1 Pro     | Always   |
+| `glm-5.2` / `glm52`             | GLM 5.2            | Always   |
+| `nemotron-3-ultra` / `nemotron` | Nemotron 3 Ultra   | Always   |
 
 Legacy aliases (`claude-3-5-sonnet`, `claude-3-opus`) are supported for compatibility.
 
@@ -482,11 +517,11 @@ print(conversation.answer)
 
 ## Subscription Tiers & Rate Limits
 
-| Tier | Cost | Pro Search | Deep Research | Labs |
-|------|------|------------|---------------|------|
-| Free | $0 | 3/day | 1/month | No |
-| Pro | $20/mo | Weekly pool | Monthly pool | Monthly pool |
-| Max | $200/mo | Weekly pool | Monthly pool | Monthly pool |
+| Tier | Cost    | Pro Search  | Deep Research | Labs         |
+| ---- | ------- | ----------- | ------------- | ------------ |
+| Free | $0      | 3/day       | 1/month       | No           |
+| Pro  | $20/mo  | Weekly pool | Monthly pool  | Monthly pool |
+| Max  | $200/mo | Weekly pool | Monthly pool  | Monthly pool |
 
 The MCP server checks quotas before each query. Use `pwm usage` or `pplx_usage` to check your limits.
 
@@ -507,6 +542,7 @@ pwm login
 ```bash
 pwm login --email your@email.com
 ```
+
 ```bash
 pwm login --email your@email.com --code 123456
 ```
@@ -516,6 +552,18 @@ pwm login --email your@email.com --code 123456
 1. Call `pplx_auth_request_code(email="your@email.com")`
 2. Check email for 6-digit code
 3. Call `pplx_auth_complete(email="your@email.com", code="123456")`
+
+If the tool returns `TOTP_REQUIRED`, call it again with
+`pplx_auth_complete(email="your@email.com", totp_code="654321")`.
+
+### Blank or Truncated Answers
+
+Perplexity can return answer chunks without the older `text` field. If `pwm ask` returns `No answer received` or only part of the answer, upgrade to the latest patch release:
+
+```bash
+uv tool upgrade perplexity-web-mcp-cli
+pwm --version
+```
 
 ### Diagnose Issues
 
@@ -556,6 +604,12 @@ The skill follows Anthropic's Agent Skills open standard and works across any co
 ## Credits
 
 Originally forked from [perplexity-webui-scraper](https://github.com/henrique-coder/perplexity-webui-scraper) by [henrique-coder](https://github.com/henrique-coder).
+
+## Support
+
+If Perplexity Web MCP saves you time or money, you can help cover the AI bills that go into building and testing it. Any support is hugely appreciated. 🙏
+
+<a href="https://buymeacoffee.com/jacobbd"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42"></a>
 
 ## License
 

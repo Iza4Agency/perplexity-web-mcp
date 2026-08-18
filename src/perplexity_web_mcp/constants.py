@@ -9,6 +9,12 @@ from typing import Final
 API_VERSION: Final[str] = "2.18"
 """Current API version used by Perplexity WebUI."""
 
+APP_HEADERS: Final[dict[str, str]] = {
+    "x-app-apiclient": "default",
+    "x-app-apiversion": API_VERSION,
+}
+"""Headers used by the Perplexity web application for internal API requests."""
+
 API_BASE_URL: Final[str] = "https://www.perplexity.ai"
 """Base URL for all API requests."""
 
@@ -26,6 +32,12 @@ ENDPOINT_RATE_LIMITS: Final[str] = "/rest/rate-limit/all"
 
 ENDPOINT_USER_SETTINGS: Final[str] = "/rest/user/settings"
 """Endpoint to fetch user settings, subscription info, and connector limits."""
+
+ENDPOINT_LIST_THREADS: Final[str] = "/rest/thread/list_ask_threads"
+"""Endpoint to list the authenticated user's Perplexity thread history (paginated)."""
+
+ENDPOINT_THREAD_DETAIL: Final[str] = "/rest/thread"
+"""Base endpoint for fetching thread detail. Append /{slug} for a specific thread."""
 
 ENDPOINT_CREDITS: Final[str] = "/rest/billing/credits"
 """Endpoint to fetch usage-based credits balance and usage breakdown."""
@@ -46,6 +58,7 @@ JSON_OBJECT_PATTERN: Final[Pattern[str]] = compile(r"^\{.*\}$")
 """Pattern to detect JSON object strings."""
 
 DEFAULT_HEADERS: Final[dict[str, str]] = {
+    **APP_HEADERS,
     "Accept": "text/event-stream, application/json",
     "Content-Type": "application/json",
 }

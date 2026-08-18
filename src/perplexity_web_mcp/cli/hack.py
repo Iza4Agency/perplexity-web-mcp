@@ -70,6 +70,18 @@ def _hack_claude(args: list[str]) -> int:
             print(f"  {model['id']:<20} {model['description']}")
         return 0
 
+    print(
+        "\033[33m⚠️  DEPRECATION WARNING: `pwm hack claude` is deprecated and will be removed in a future release.\033[0m\n"
+        "   Proxying Claude Code via Perplexity web scraper is unreliable due to Rate Limits and prompt overhead.\n"
+        "   Please use `pwm ask`, `pwm chat`, or `pwm-mcp` instead.\n",
+        file=sys.stderr,
+    )
+    if sys.stdin.isatty():
+        try:
+            input("Press Enter to continue...")
+        except (KeyboardInterrupt, EOFError):
+            return 0
+
     # 1. Verify claude is installed
     claude_path = shutil.which("claude")
     if not claude_path:
@@ -82,19 +94,25 @@ def _hack_claude(args: list[str]) -> int:
         )
         return 1
 
+    trace_enabled = "--trace" in args or os.getenv("PWM_TRACE") == "1"
+    if trace_enabled:
+        from perplexity_web_mcp.trace import get_trace_log_path, reset_trace_log
+
+        reset_trace_log()
+        print(f"Trace mode enabled! Logs will be saved to {get_trace_log_path()}", file=sys.stderr)
+
     # 2. Launch API Server
     port = _get_free_port()
     print(f"Starting local API server on port {port}...", file=sys.stderr)
 
     server_env = os.environ.copy()
     server_env["PORT"] = str(port)
+    if trace_enabled:
+        server_env["PWM_TRACE"] = "1"
 
-    pwm_path = shutil.which("pwm")
-    if not pwm_path:
-        pwm_path = sys.executable
-        server_cmd = [pwm_path, "-m", "perplexity_web_mcp.api.server"]
-    else:
-        server_cmd = [pwm_path, "api", "--port", str(port)]
+    server_cmd = [sys.executable, "-m", "perplexity_web_mcp.cli.main", "api", "--port", str(port)]
+    if trace_enabled:
+        server_cmd.append("--trace")
 
     server_process = subprocess.Popen(
         server_cmd,
@@ -115,7 +133,6 @@ def _hack_claude(args: list[str]) -> int:
         env = os.environ.copy()
 
         # Clear out any existing Anthropic/Claude/Vertex variables to prevent conflicts
-        # (e.g., CLAUDE_CODE_USE_VERTEX or ANTHROPIC_VERTEX_PROJECT_ID)
         for key in list(env.keys()):
             if key.startswith("ANTHROPIC_") or key.startswith("CLAUDE_"):
                 del env[key]
@@ -123,11 +140,8 @@ def _hack_claude(args: list[str]) -> int:
         env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{port}"
         env["ANTHROPIC_API_KEY"] = "perplexity"
 
-        # 5. Handle model selection
-        # Pass model via --model directly to Claude Code. When Claude Code shows its
-        # /model picker with built-in names (sonnet, opus, haiku), our API server maps
-        # those to the correct Perplexity models. This enables mid-session switching.
-        claude_args = list(args)
+        # 5. Handle model selection & strip --trace from Claude Code's args
+        claude_args = [a for a in args if a != "--trace"]
         if "-m" in claude_args:
             idx = claude_args.index("-m")
             claude_args[idx] = "--model"
@@ -135,7 +149,7 @@ def _hack_claude(args: list[str]) -> int:
             claude_args.extend(["--model", "perplexity-auto"])
 
         # 6. Guard Claude's settings.json against /model corruption.
-        #    Claude Code persists /model selections (e.g. "gpt54") to
+        #    Claude Code persists /model selections (e.g. "gpt56_terra") to
         #    ~/.claude/settings.json. Those non-Anthropic model names break
         #    Claude when launched normally. We memorize the original file
         #    content and restore it after the session ends.
@@ -153,9 +167,9 @@ def _hack_claude(args: list[str]) -> int:
         return result.returncode
 
     finally:
-        # 7. Clean up the API server
+        # 8. Clean up the API server
         if server_process.poll() is None:
-            print("\nShutting down local API server...", file=sys.stderr)
+            print("Shutting down local API server...", file=sys.stderr)
             server_process.terminate()
             try:
                 server_process.wait(timeout=5)

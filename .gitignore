@@ -28,3 +28,6 @@ publish.sh
 *.mcpb
 .DS_Store
 thumbs.db
+
+# Upstream (jacob-bd) commits a 358 MB Chrome debug profile; never take it.
+.chrome-debug-profile/

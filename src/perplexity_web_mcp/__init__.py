@@ -21,6 +21,7 @@ from .models import Model, Models
 from .rate_limits import RateLimitCache, RateLimits, SourceLimit, UserSettings, fetch_rate_limits, fetch_user_settings
 from .router import Intent, QuotaLevel, QuotaState, RoutingDecision, SmartResponse, SmartRouter
 from .shared import council_ask, smart_ask
+from .trace import get_trace_log_path, is_trace_enabled, log_trace, reset_trace_log
 from .types import Coordinates, Response, SearchResultItem
 
 
@@ -67,5 +68,9 @@ __all__: list[str] = [
     "council_ask",
     "fetch_rate_limits",
     "fetch_user_settings",
+    "get_trace_log_path",
+    "is_trace_enabled",
+    "log_trace",
+    "reset_trace_log",
     "smart_ask",
 ]

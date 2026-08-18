@@ -47,3 +47,35 @@ class _FileInfo:
     size: int
     mimetype: str
     is_image: bool
+
+
+class ThreadListEntry(BaseModel):
+    """A single thread entry returned from the list threads endpoint."""
+
+    slug: str
+    title: str = "(untitled)"
+    query_str: str = ""
+    answer_preview: str = ""
+    display_model: str = ""
+    query_count: int = 1
+    last_query_datetime: str = ""
+
+
+class ThreadTurn(BaseModel):
+    """A single conversation turn (Q&A) in a thread."""
+
+    query_str: str = ""
+    display_model: str = ""
+    created_at: str = ""
+    answer: str = ""
+    sources: list[SearchResultItem] = []
+    related_queries: list[str] = []
+
+
+class ThreadDetail(BaseModel):
+    """Full detail of a Perplexity thread."""
+
+    slug: str
+    title: str = "(untitled)"
+    created_at: str = ""
+    turns: list[ThreadTurn] = []

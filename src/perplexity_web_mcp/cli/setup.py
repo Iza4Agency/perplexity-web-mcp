@@ -22,7 +22,12 @@ from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 import rich_click as click
-import tomllib
+
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 
 console = Console()
@@ -119,7 +124,7 @@ def _cline_config_path() -> Path:
 
 
 def _antigravity_config_path() -> Path:
-    return Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
+    return Path.home() / ".gemini" / "config" / "mcp_config.json"
 
 
 def _codex_config_path() -> Path:

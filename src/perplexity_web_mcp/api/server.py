@@ -20,10 +20,10 @@ Claude Code Integration:
     export ANTHROPIC_API_KEY=""
 
   Then run Claude Code with any supported model:
-    claude --model claude-sonnet-4-6      # Use Claude 4.6 Sonnet via Perplexity
-    claude --model gpt-5.4                # Use GPT-5.4 via Perplexity
+    claude --model claude-sonnet-5-0      # Use Claude Sonnet 5 via Perplexity
+    claude --model gpt-5.6-terra          # Use GPT-5.6 Terra via Perplexity
     claude --model perplexity-auto        # Use Perplexity's auto model selection
-    claude --model claude-3-5-sonnet      # Legacy name, maps to Claude 4.6 Sonnet
+    claude --model claude-3-5-sonnet      # Legacy name, maps to Claude Sonnet 5
 """
 
 from __future__ import annotations
@@ -46,17 +46,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
-from perplexity_web_mcp import ConversationConfig, Models, Perplexity
+from perplexity_web_mcp import ConversationConfig, Models, Perplexity, ResponseParsingError
 
 # Tool calling disabled for now - models don't reliably follow format instructions
 # from perplexity_web_mcp.api.tool_calling import (...)
-from perplexity_web_mcp.api.session_manager import (
-    ConversationManager,
-    distill_system_prompt,
-)
+from perplexity_web_mcp.api.session_manager import ConversationManager
 from perplexity_web_mcp.enums import CitationMode
 from perplexity_web_mcp.models import Model
 from perplexity_web_mcp.token_store import load_token
+from perplexity_web_mcp.trace import log_trace
 
 
 # Supported Anthropic API version
@@ -103,7 +101,7 @@ class ServerConfig:
 
 # Map model names to Perplexity models
 # Supports Anthropic, OpenAI, and standard Claude Code model naming conventions
-# Updated Mar 2026 to match Perplexity UI offerings
+# Updated Jul 2026 to match Perplexity UI offerings
 MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     # ==========================================================================
     # Perplexity Native Models
@@ -117,50 +115,57 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     "deep-research": (Models.DEEP_RESEARCH, None),
     # ==========================================================================
     # Anthropic Claude Models (via Perplexity)
-    # Claude Sonnet 4.6 - supports thinking toggle
-    # Claude Opus 4.6 - supports thinking (requires Max subscription)
+    # Claude Sonnet 5 - supports thinking toggle
+    # Claude Opus 4.8 - supports thinking (requires Max subscription)
     # ==========================================================================
     # Current model names
-    "claude-sonnet-4-6": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "claude-4-6-sonnet": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "claude-sonnet-4-6-20260217": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    # Legacy Sonnet 4.5 aliases (map to 4.6)
-    "claude-sonnet-4-5": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "claude-4-5-sonnet": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "claude-opus-4-7": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-4-7-opus": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-opus-4-7-20260401": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    # Legacy Opus 4.6/4.5 aliases (map to 4.7)
-    "claude-opus-4-6": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-4-6-opus": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-opus-4-6-20260203": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-opus-4-5": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-4-5-opus": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-opus-4-5-20251101": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
+    "claude-sonnet-5-0": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-5-0-sonnet": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-sonnet-5": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-5-sonnet": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    # Legacy Sonnet aliases map to the current Perplexity Sonnet selection.
+    "claude-sonnet-4-6": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-4-6-sonnet": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-sonnet-4-6-20260217": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-sonnet-4-5": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-4-5-sonnet": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-opus-4-8": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-4-8-opus": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-opus-4-7": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-4-7-opus": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-opus-4-7-20260401": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    # Legacy Opus aliases map to the current Perplexity Opus selection.
+    "claude-opus-4-6": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-4-6-opus": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-opus-4-6-20260203": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-opus-4-5": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-4-5-opus": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-opus-4-5-20251101": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
     # Claude Code default model aliases (for compatibility)
     # These allow `claude --model claude-3-5-sonnet` to work
-    "claude-3-5-sonnet": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "claude-3-5-sonnet-20241022": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "claude-3-opus": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-3-opus-20240229": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
-    "claude-3-5-haiku": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),  # Map to Sonnet
-    "claude-haiku-4-5-20251001": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),  # Map Haiku to Sonnet
-    "claude-haiku": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
+    "claude-3-5-sonnet": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-3-5-sonnet-20241022": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "claude-3-opus": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-3-opus-20240229": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
+    "claude-3-5-haiku": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),  # Map to Sonnet
+    "claude-haiku-4-5-20251001": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),  # Map Haiku to Sonnet
+    "claude-haiku": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
     # Generic aliases
-    "claude": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "sonnet": (Models.CLAUDE_46_SONNET, Models.CLAUDE_46_SONNET_THINKING),
-    "opus": (Models.CLAUDE_47_OPUS, Models.CLAUDE_47_OPUS_THINKING),
+    "claude": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "sonnet": (Models.CLAUDE_50_SONNET, Models.CLAUDE_50_SONNET_THINKING),
+    "opus": (Models.CLAUDE_48_OPUS, Models.CLAUDE_48_OPUS_THINKING),
     # ==========================================================================
-    # OpenAI GPT Models (via Perplexity) - support thinking toggle
+    # OpenAI GPT and xAI Grok Models (via Perplexity) - support thinking toggle
     # ==========================================================================
-    "gpt-5.4": (Models.GPT_54, Models.GPT_54_THINKING),
-    "gpt-5-4": (Models.GPT_54, Models.GPT_54_THINKING),
-    "gpt-54": (Models.GPT_54, Models.GPT_54_THINKING),
-    "gpt54": (Models.GPT_54, Models.GPT_54_THINKING),
-    "gpt-5.5": (Models.GPT_55, Models.GPT_55_THINKING),
-    "gpt-5-5": (Models.GPT_55, Models.GPT_55_THINKING),
-    "gpt-55": (Models.GPT_55, Models.GPT_55_THINKING),
-    "gpt55": (Models.GPT_55, Models.GPT_55_THINKING),
+    "gpt-5.6-terra": (Models.GPT_56_TERRA, Models.GPT_56_TERRA_THINKING),
+    "gpt-5-6-terra": (Models.GPT_56_TERRA, Models.GPT_56_TERRA_THINKING),
+    "gpt56_terra": (Models.GPT_56_TERRA, Models.GPT_56_TERRA_THINKING),
+    "gpt-5.6-sol": (Models.GPT_56_SOL, Models.GPT_56_SOL_THINKING),
+    "gpt-5-6-sol": (Models.GPT_56_SOL, Models.GPT_56_SOL_THINKING),
+    "gpt56_sol": (Models.GPT_56_SOL, Models.GPT_56_SOL_THINKING),
+    "grok-4.5": (Models.GROK_45, Models.GROK_45_THINKING),
+    "grok-4-5": (Models.GROK_45, Models.GROK_45_THINKING),
+    "grok45": (Models.GROK_45, Models.GROK_45_THINKING),
     # ==========================================================================
     # Google Gemini Models (via Perplexity)
     # Gemini 3.1 Pro: thinking ALWAYS enabled (no toggle in UI)
@@ -176,6 +181,14 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
     "nemotron-3": (Models.NEMOTRON_3_ULTRA, Models.NEMOTRON_3_ULTRA),
     "nemotron": (Models.NEMOTRON_3_ULTRA, Models.NEMOTRON_3_ULTRA),
     # ==========================================================================
+    # Z.ai GLM 5.2 (via Perplexity)
+    # Thinking ALWAYS enabled (no toggle in UI) - reasoning only
+    # ==========================================================================
+    "glm-5.2": (Models.GLM_5_2, Models.GLM_5_2),
+    "glm-5-2": (Models.GLM_5_2, Models.GLM_5_2),
+    "glm52": (Models.GLM_5_2, Models.GLM_5_2),
+    "glm": (Models.GLM_5_2, Models.GLM_5_2),
+    # ==========================================================================
     # Moonshot Kimi Models (via Perplexity)
     # Kimi K2.6 - supports thinking toggle
     # ==========================================================================
@@ -185,24 +198,28 @@ MODEL_MAP: dict[str, tuple[Model, Model | None]] = {
 }
 
 # Models we expose via /v1/models
-# Ordered to match Perplexity UI (Mar 2026)
+# Ordered to match Perplexity UI search models (Jul 2026)
 AVAILABLE_MODELS = [
     # Perplexity Native
     {"id": "perplexity-auto", "description": "Best - Automatically selects optimal model"},
     {"id": "perplexity-sonar", "description": "Sonar 2 - Perplexity's latest in-house model"},
     {"id": "perplexity-research", "description": "Deep Research - In-depth reports with sources"},
+    # OpenAI
+    {"id": "gpt-5.6-terra", "description": "GPT-5.6 Terra - OpenAI's versatile model, thinking toggle available"},
+    {"id": "gpt-5.6-sol", "description": "GPT-5.6 Sol - OpenAI's most powerful model, Max tier required"},
     # Google Gemini
     {"id": "gemini-3.1-pro", "description": "Gemini 3.1 Pro - Advanced, thinking always on"},
-    # OpenAI
-    {"id": "gpt-5.4", "description": "GPT-5.4 - OpenAI's versatile model, thinking toggle available"},
-    {"id": "gpt-5.5", "description": "GPT-5.5 - OpenAI's latest, Max tier required, thinking toggle available"},
     # Anthropic Claude
-    {"id": "claude-sonnet-4-6", "description": "Claude Sonnet 4.6 - Fast, thinking toggle available"},
+    {"id": "claude-sonnet-5", "description": "Claude Sonnet 5 - Fast, thinking toggle available"},
     {"id": "claude-opus-4-8", "description": "Claude Opus 4.8 - Advanced reasoning, Max tier required"},
-    # NVIDIA
-    {"id": "nemotron-3-ultra", "description": "Nemotron 3 Ultra - NVIDIA 120B, thinking always on"},
+    # Z.ai
+    {"id": "glm-5.2", "description": "GLM 5.2 - Z.ai advanced model, thinking always on"},
     # Moonshot
     {"id": "kimi-k2.6", "description": "Kimi K2.6 - Advanced, thinking toggle available"},
+    # xAI
+    {"id": "grok-4.5", "description": "Grok 4.5 - xAI's most advanced model, thinking toggle available"},
+    # NVIDIA
+    {"id": "nemotron-3-ultra", "description": "Nemotron 3 Ultra - NVIDIA 550B, thinking always on"},
 ]
 
 
@@ -285,7 +302,7 @@ class MessagesRequest(BaseModel):
     Reference: https://docs.anthropic.com/en/api/messages
     """
 
-    model: str = Field(..., description="Model to use (e.g., 'claude-sonnet-4-6')")
+    model: str = Field(..., description="Model to use (e.g., 'claude-sonnet-5-0')")
     max_tokens: int = Field(..., description="Maximum tokens to generate")
     messages: list[MessageParam] = Field(..., description="Conversation messages")
 
@@ -512,6 +529,26 @@ perplexity_semaphore: asyncio.Semaphore
 # Track last request time for rate limiting
 last_request_time: float = 0.0
 MIN_REQUEST_INTERVAL: float = 5.0  # Minimum seconds between Perplexity requests (Perplexity rate limits)
+API_CONTEXT_MAX_CHARS: int = int(os.getenv("PWM_API_CONTEXT_MAX_CHARS", "60000"))
+
+# Perplexity backend error frames known to be transient (retry-worthy) rather than
+# indicative of a malformed request. Matched as a substring against the exception message.
+_RETRYABLE_BACKEND_MESSAGES: tuple[str, ...] = (
+    "error in processing query",
+    "missing 'text' field",
+)
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """Whether a query failure looks transient and worth retrying."""
+
+    error_str = str(error)
+    if "curl" in error_str.lower():
+        return True
+    if isinstance(error, ResponseParsingError):
+        lowered = error_str.lower()
+        return any(marker in lowered for marker in _RETRYABLE_BACKEND_MESSAGES)
+    return False
 
 
 # =============================================================================
@@ -617,29 +654,85 @@ def messages_to_query(messages: list[MessageParam]) -> str:
     return "\n\n".join(parts)
 
 
+def bound_context_text(text: str | None, max_chars: int = API_CONTEXT_MAX_CHARS) -> str:
+    """Preserve prompt context within a bounded character budget."""
+    if not text:
+        return ""
+
+    stripped = text.strip()
+    if len(stripped) <= max_chars:
+        return stripped
+    if max_chars <= 0:
+        return ""
+
+    marker = f"\n\n[... {len(stripped)} characters of API context truncated to fit budget ...]\n\n"
+    available = max_chars - len(marker)
+    if available <= 0:
+        return stripped[:max_chars]
+
+    head_chars = available // 2
+    tail_chars = available - head_chars
+    return f"{stripped[:head_chars].rstrip()}{marker}{stripped[-tail_chars:].lstrip()}"
+
+
+def build_query_with_system_context(query: str, system_text: str | None) -> str:
+    """Prefix a user/conversation query with preserved system/workspace context."""
+    context = bound_context_text(system_text)
+    if not context:
+        return query
+
+    return f"[System instructions and workspace context]\n{context}\n\n[Conversation]\n{query}"
+
+
+def openai_messages_to_search_query(messages: list[OpenAIChatMessage]) -> str:
+    """Return the latest user text for Perplexity search initialization."""
+    for msg in reversed(messages):
+        if msg.role == "user":
+            text = msg.get_text().strip()
+            if text:
+                return text
+
+    return openai_messages_to_query(messages)[:500]
+
+
 def openai_messages_to_query(messages: list[OpenAIChatMessage]) -> str:
     """Convert OpenAI chat messages to Perplexity query.
 
-    Note: System messages are intentionally NOT included to avoid URL length
-    limits with Perplexity.
+    System and developer messages are preserved because agent runtimes use them
+    for workspace bootstrap context. URL length is handled separately by passing
+    a short init_query to Perplexity's search initialization endpoint.
     """
-    # Filter out system messages and get user/assistant messages only
-    conversation_msgs = [m for m in messages if m.role in ("user", "assistant")]
+    supported_msgs = [m for m in messages if m.role in ("system", "developer", "user", "assistant", "tool")]
 
     # For single user message, just return it directly
-    user_msgs = [m for m in conversation_msgs if m.role == "user"]
-    if len(user_msgs) == 1 and len(conversation_msgs) == 1:
+    user_msgs = [m for m in supported_msgs if m.role == "user"]
+    if len(user_msgs) == 1 and len(supported_msgs) == 1:
         return user_msgs[0].get_text()
 
     # Multi-turn: format as conversation
-    parts = []
-    for msg in conversation_msgs:
-        text = msg.get_text()
-        if msg.role == "user":
-            parts.append(f"User: {text}")
-        elif msg.role == "assistant":
-            parts.append(f"Assistant: {text}")
+    context_parts = []
+    conversation_parts = []
+    role_labels = {
+        "system": "System",
+        "developer": "Developer",
+        "user": "User",
+        "assistant": "Assistant",
+        "tool": "Tool",
+    }
 
+    for msg in supported_msgs:
+        text = msg.get_text()
+        if not text:
+            continue
+        label = role_labels[msg.role]
+        formatted = f"{label}: {text}"
+        if msg.role in ("system", "developer"):
+            context_parts.append(formatted)
+        else:
+            conversation_parts.append(formatted)
+
+    context = bound_context_text("\n\n".join(context_parts))
+    parts = [part for part in (context, "\n\n".join(conversation_parts)) if part]
     return "\n\n".join(parts)
 
 
@@ -797,16 +890,31 @@ async def create_message(request: Request, body: MessagesRequest):
 
     # Convert messages to query (tool calling not supported via web UI)
     query = messages_to_query(body.messages)
-    input_tokens = estimate_tokens(query)
+    full_query = build_query_with_system_context(query, system_text)
+    input_tokens = estimate_tokens(full_query)
 
     # Generate response ID
     response_id = f"msg_{uuid.uuid4().hex[:24]}"
 
     logging.info(f"Request: model={body.model}, thinking={thinking_enabled}, stream={body.stream}")
 
+    log_trace(
+        f"[STAGE 1 - INBOUND REQUEST] model={body.model} thinking={thinking_enabled} "
+        f"stream={body.stream} system_len={len(system_text or '')} "
+        f"messages_count={len(body.messages)} tools_count={len(body.tools or [])}"
+    )
+    if system_text:
+        log_trace(f"[STAGE 1 - SYSTEM PROMPT]\n{system_text}")
+
+    log_trace(
+        f"[STAGE 2 - TRANSFORMED QUERY] target_model={model.identifier} mode={model.mode} "
+        f"init_query={query!r} full_query_len={len(full_query)}"
+    )
+    log_trace(f"[STAGE 2 - FULL QUERY BODY]\n{full_query}")
+
     if body.stream:
         return StreamingResponse(
-            stream_response(response_id, body.model, model, query, input_tokens, system_text),
+            stream_response(response_id, body.model, model, full_query, input_tokens, init_query=query),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -816,56 +924,58 @@ async def create_message(request: Request, body: MessagesRequest):
         )
 
     # Non-streaming response
-    try:
-        # Create fresh client for each request (with semaphore to limit concurrency)
-        async with perplexity_semaphore:
-            global last_request_time
-            import time as time_module
+    global last_request_time
+    import time as time_module
 
-            # Rate limiting: ensure minimum interval between requests
-            now = time_module.time()
-            wait_needed = MIN_REQUEST_INTERVAL - (now - last_request_time)
-            if wait_needed > 0:
-                logging.debug(f"Rate limiting: waiting {wait_needed:.1f}s")
-                await asyncio.sleep(wait_needed)
-            last_request_time = time_module.time()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Create fresh client for each request (with semaphore to limit concurrency)
+            async with perplexity_semaphore:
+                # Rate limiting: ensure minimum interval between requests
+                now = time_module.time()
+                wait_needed = MIN_REQUEST_INTERVAL - (now - last_request_time)
+                if wait_needed > 0:
+                    logging.debug(f"Rate limiting: waiting {wait_needed:.1f}s")
+                    await asyncio.sleep(wait_needed)
+                last_request_time = time_module.time()
 
-            # Prepend distilled system prompt to query (single ask)
-            full_query = query
-            if system_text:
-                distilled = distill_system_prompt(system_text)
-                full_query = f"[Instructions: {distilled}]\n\n{query}"
+                fresh_client = Perplexity(session_token=config.session_token)
+                conversation = fresh_client.create_conversation(
+                    ConversationConfig(model=model, citation_mode=CitationMode.DEFAULT)
+                )
+                # Single ask with prepended system context
+                await asyncio.to_thread(conversation.ask, full_query, init_query=query)
+                fresh_client.close()
+            answer = conversation.answer or ""
 
-            fresh_client = Perplexity(session_token=config.session_token)
-            conversation = fresh_client.create_conversation(
-                ConversationConfig(model=model, citation_mode=CitationMode.DEFAULT)
-            )
-            # Single ask with prepended system context
-            await asyncio.to_thread(conversation.ask, full_query)
-            fresh_client.close()
-        answer = conversation.answer or ""
+            # Append citations if available
+            citations = format_citations(conversation.search_results)
+            full_response = answer + citations
 
-        # Append citations if available
-        citations = format_citations(conversation.search_results)
-        full_response = answer + citations
+            return {
+                "id": response_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": full_response}],
+                "model": body.model,
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": estimate_tokens(full_response),
+                },
+            }
 
-        return {
-            "id": response_id,
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "text", "text": full_response}],
-            "model": body.model,
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {
-                "input_tokens": input_tokens,
-                "output_tokens": estimate_tokens(full_response),
-            },
-        }
-
-    except Exception as e:
-        logging.error(f"Error creating message: {e}")
-        raise HTTPException(status_code=500, detail={"type": "api_error", "message": str(e)})
+        except Exception as e:  # noqa: PERF203 -- retry loop is network-bound, max 3 iterations
+            last_request_time = time_module.time()  # Update even on error
+            if _is_retryable_error(e) and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2
+                logging.warning(f"Retryable error (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s")
+                await asyncio.sleep(wait_time)
+                continue
+            logging.error(f"Error creating message: {e}")
+            raise HTTPException(status_code=500, detail={"type": "api_error", "message": str(e)})
 
 
 async def stream_response(
@@ -874,7 +984,7 @@ async def stream_response(
     model: Model,
     query: str,
     input_tokens: int,
-    system_text: str | None = None,
+    init_query: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream Anthropic-format SSE response.
 
@@ -944,13 +1054,6 @@ async def stream_response(
         last = ""
         max_retries = 3
 
-        # Prepend distilled system prompt to query (single ask instead of priming)
-        full_query = query
-        if system_text:
-            distilled = distill_system_prompt(system_text)
-            full_query = f"[Instructions: {distilled}]\n\n{query}"
-            logging.debug(f"Query with system context ({len(distilled)} chars)")
-
         for attempt in range(max_retries):
             try:
                 # Create fresh client for each request to avoid curl_cffi Session issues
@@ -960,7 +1063,7 @@ async def stream_response(
                 )
 
                 # Single ask with prepended system context
-                for resp in conversation.ask(full_query, stream=True):
+                for resp in conversation.ask(query, stream=True, init_query=init_query):
                     current = resp.answer or ""
                     if len(current) > len(last):
                         delta = current[len(last) :]
@@ -977,9 +1080,11 @@ async def stream_response(
             except Exception as e:
                 error_str = str(e)
                 last_request_time = time_module.time()  # Update even on error
-                if "curl" in error_str.lower() and attempt < max_retries - 1:
+                if _is_retryable_error(e) and attempt < max_retries - 1:
                     wait_time = (attempt + 1) * 2
-                    logging.warning(f"Curl error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s")
+                    logging.warning(
+                        f"Retryable error (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s"
+                    )
                     time_module.sleep(wait_time)
                     last = ""
                     continue
@@ -1014,8 +1119,9 @@ async def stream_response(
 
         elif kind == "error":
             logging.error(f"Stream error: {payload}")
-            # Add recovery instructions for 403 errors
-            error_msg = payload
+            log_trace(f"[STAGE 4 - STREAM ERROR] {payload}")
+            # Strip wrapper prefixes for cleaner client-facing messages
+            error_msg = payload.removeprefix("Failed to parse API response: ")
             if "403" in payload or "forbidden" in payload.lower():
                 error_msg = (
                     "Session token expired (403). "
@@ -1028,6 +1134,7 @@ async def stream_response(
             }
             yield f"event: content_block_delta\ndata: {json.dumps(error_delta)}\n\n"
             break
+
         else:  # done - payload is (answer, citations)
             total_output, citations_text = payload
             break
@@ -1096,6 +1203,7 @@ async def create_chat_completion(request: Request, body: OpenAIChatRequest):
 
     # Convert messages to query
     query = openai_messages_to_query(body.messages)
+    init_query = openai_messages_to_search_query(body.messages)
     input_tokens = estimate_tokens(query)
 
     # Generate response ID
@@ -1106,7 +1214,7 @@ async def create_chat_completion(request: Request, body: OpenAIChatRequest):
 
     if body.stream:
         return StreamingResponse(
-            stream_openai_response(response_id, body.model, model, query, created),
+            stream_openai_response(response_id, body.model, model, query, created, init_query),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -1125,7 +1233,7 @@ async def create_chat_completion(request: Request, body: OpenAIChatRequest):
         )
 
         # Run in thread to not block
-        await asyncio.to_thread(conversation.ask, query)
+        await asyncio.to_thread(conversation.ask, query, init_query=init_query)
         answer = conversation.answer or ""
 
         # Append citations if available
@@ -1162,6 +1270,7 @@ async def stream_openai_response(
     model: Model,
     query: str,
     created: int,
+    init_query: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream OpenAI-format SSE response.
 
@@ -1201,7 +1310,7 @@ async def stream_openai_response(
             conversation = client.create_conversation(
                 ConversationConfig(model=model, citation_mode=CitationMode.DEFAULT)
             )
-            for resp in conversation.ask(query, stream=True):
+            for resp in conversation.ask(query, stream=True, init_query=init_query):
                 current = resp.answer or ""
                 if len(current) > len(last):
                     delta = current[len(last) :]

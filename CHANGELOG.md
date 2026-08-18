@@ -4,7 +4,167 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ---
 
-## [0.12.3] - 2026-06-14
+## [0.14.9] - 2026-08-14
+
+### Fixed
+
+- **Blocks-only SSE answer assembly** — Reconstructs complete answers from incremental `ask_text` chunks when Perplexity omits the `text` and `answer` fields, preventing blank or truncated responses. ([#21](https://github.com/jacob-bd/perplexity-web-mcp/issues/21))
+
+## [0.14.8] - 2026-08-05
+
+### Fixed
+
+- **Schematized streaming responses** — Added support for Perplexity's blocks-only SSE response format, including `ask_text` and `web_results` blocks, preventing `Missing 'text' field` errors. ([#19](https://github.com/jacob-bd/perplexity-web-mcp/issues/19))
+
+## [0.14.7] - 2026-07-28
+
+### Added
+
+- **`FREE_TIER_RATE_LIMITED` Error Detection** — Added explicit error handling in core client when Perplexity's web backend returns `FREE_TIER_RATE_LIMITED` SSE frames, providing a clear user message instead of a generic blank response.
+- **`Models.AUTO` Model Definition** — Added `Models.AUTO` (`identifier="auto"`, `mode="concise"`) to support standard free search routing.
+
+### Deprecated
+
+- **`pwm hack claude` Command Deprecation** — Deprecated `pwm hack claude` CLI command due to web scraper rate limit constraints and proprietary prompt overhead. Added an interactive pre-launch deprecation prompt.
+
+---
+
+## [0.14.6] - 2026-07-26
+
+### Added
+
+- **Diagnostic Trace Mode (`--trace`)** — Added full 4-stage request/response diagnostic tracing for `pwm api --trace` and `pwm hack claude --trace`. Logs un-truncated payloads (system prompts, prompt context transformations, raw Perplexity SSE lines, and client response deltas) to `~/.config/perplexity-web-mcp/logs/api-trace.log` with automatic credential redaction to help pinpoint API integration failures. ([#17](https://github.com/jacob-bd/perplexity-web-mcp/issues/17))
+
+### Changed
+
+- **Version bump** — Aligned package, desktop extension metadata, bundled skill, project skill, and lockfile at `0.14.6`.
+
+---
+
+## [0.14.5] - 2026-07-25
+
+
+### Fixed
+
+- **API server retries** — The Anthropic-compatible `/v1/messages` endpoint now retries transient Perplexity backend error frames (e.g. `Error in processing query.`) instead of failing the request immediately; the non-streaming path previously had no retry at all. ([#17](https://github.com/jacob-bd/perplexity-web-mcp/issues/17))
+
+### Changed
+
+- **Version bump** — Aligned package, desktop extension metadata, bundled skill, project skill, and lockfile at `0.14.5`.
+
+---
+
+## [0.14.4] - 2026-07-23
+
+### Fixed
+
+- **SSE error message extraction** — Preserves raw Perplexity error strings (e.g. `data: {"text": "Error in processing query."}`) in `ResponseParsingError` instead of masking backend rejections behind generic JSON decoding failures. ([#17](https://github.com/jacob-bd/perplexity-web-mcp/issues/17))
+- **API stream error formatting** — Strips internal error prefixes in the Anthropic/OpenAI API compatibility server so clients receive clean, actionable error messages.
+
+### Changed
+
+- **Version bump** — Aligned package, desktop extension metadata, bundled skill, project skill, and lockfile at `0.14.4`.
+
+---
+
+## [0.14.3] - 2026-07-21
+
+### Added
+
+- **Continuous integration** — Added GitHub Actions checks for Ruff linting, formatting, and the unit suite across Python 3.10–3.13.
+- **TOTP authentication** — Added explicit TOTP challenge support to interactive, non-interactive, and MCP authentication flows.
+- **Authentication regression coverage** — Added tests for callback redirects, TOTP challenges, Perplexity application headers, MCP challenge persistence, and chunked session cookies.
+
+### Changed
+
+- **Perplexity application headers** — Added the current `x-app-apiclient` and `x-app-apiversion` headers to query and account-limit sessions to avoid Cloudflare 403 responses.
+- **Thread library opt-in** — Added `PWM_SAVE_TO_LIBRARY` for saving shared CLI and MCP queries to the Perplexity thread library; queries remain incognito by default.
+- **Community contribution** — Thanks to [@Vitamin4107](https://github.com/Vitamin4107) for contributing both improvements in [#15](https://github.com/jacob-bd/perplexity-web-mcp/pull/15).
+- **Shared authentication protocol** — Consolidated duplicated CLI and MCP callback handling into one authentication module.
+- **Documentation and skills** — Updated authentication, configuration, MCP tool, quick-start, bundled skill, and desktop-extension documentation, and aligned all version metadata at `0.14.3`.
+
+### Fixed
+
+- **Session token extraction** — Reassembles session tokens split across multiple cookies instead of reporting that no token was found.
+- **Python 3.10 setup support** — Added the `tomli` fallback required by the package's declared Python 3.10 support.
+- **Environment-independent setup tests** — Removed a host-dependent Codex configuration assertion that failed on clean CI runners.
+
+---
+
+## [0.14.2] - 2026-07-14
+
+### Changed
+
+- **Perplexity model roster** — Replaced GPT-5.4 and GPT-5.5 with GPT-5.6 Terra, GPT-5.6 Sol, and Grok 4.5 across the CLI, MCP tools, API-compatible server, Model Council, bundled skill, and documentation. Claude Sonnet's display name now matches Perplexity's `Claude Sonnet 5` label.
+- **Version bump** — Bumped package, bundled skill, project skill, desktop extension metadata, and lockfile to `0.14.2`.
+
+---
+
+## [0.14.1] - 2026-07-07
+
+### Fixed
+
+- **API context preservation** — OpenAI-compatible Chat requests now preserve `system` and `developer` messages instead of dropping them, so workspace/bootstrap context reaches Perplexity.
+- **Anthropic API system prompts** — Anthropic-compatible Messages requests now preserve bounded raw system/workspace context instead of aggressively distilling it and losing later instructions.
+- **Large context search initialization** — API requests now use the latest user message as the short Perplexity search-init query while sending the full bounded context in the ask payload, avoiding URL-length issues without stripping prompt context.
+- **Regression coverage** — Added API context preservation tests for OpenAI and Anthropic compatibility paths, including `init_query` behavior.
+
+### Changed
+
+- **Version Bump** — Bumped package, bundled skill, project skill, desktop extension metadata, and lockfile to `0.14.1`.
+
+---
+
+## [0.14.0] - 2026-07-02
+
+### Added
+
+- **Account Connector Source Routing** — Added support for routing CLI, MCP, smart-query, research, and Model Council requests through Perplexity account connector source IDs such as `pitchbook_mcp_cashmere` and `cbinsights_mcp_cashmere`.
+  - **CLI Discovery**: Added `pwm connectors list` to show connector source IDs and remaining monthly source quota from the authenticated account.
+  - **MCP Discovery**: Added `pplx_connectors()` so AI agents can discover connector IDs before passing them as `source_focus`.
+  - **Connector Docs**: Added `docs/connectors.md` and updated README, `pwm --ai`, bundled skill docs, and MCP references with connector usage rules.
+  - **Safety**: Unknown source values now fail loudly instead of silently falling back to normal web search.
+
+### Changed
+
+- **Perplexity Model Roster** — Aligned search model definitions and docs with the current Perplexity model set, including Claude Sonnet 5.0, GLM 5.2, and current premium model metadata.
+- **Source Focus Internals** — Source focus handling now resolves built-in aliases and raw source IDs through one shared path, so CLI, MCP, smart routing, and council behavior stay consistent.
+- **Version Bump** — Bumped package, bundled skill, project skill, and desktop extension metadata to `0.14.0`.
+
+### Fixed
+
+- **`pplx_council` error handling** — `SourceResolutionError` from an invalid `source_focus` now returns a formatted error string instead of propagating as a raw exception through FastMCP.
+- **`pplx_deep_research_start` source validation** — Source focus is now validated before the background thread is spawned. An invalid source returns an error immediately instead of reporting `status: "completed"` with an error message in the body on poll.
+- **Connector listing excludes builtin sources** — `pplx_connectors()` and `pwm connectors list` no longer show builtin sources (e.g. `box`, `edgar`) that happen to have a monthly quota, preventing them from being mistaken for account connector IDs.
+- **Connector filter deduplication** — The logic for classifying connector sources is now shared between CLI and MCP via `get_connector_sources()` in `shared.py`.
+- **Whitespace `source_focus` default** — A whitespace-only `source_focus` value now correctly falls back to `"web"` instead of raising `SourceResolutionError("Unknown source ''")`.
+- **Connector ID regex rejects trailing underscores** — `pitchbook_mcp_` (trailing `_`) no longer passes the connector ID pattern and reaches the Perplexity API with an opaque error.
+- **Source resolution performance** — Cheap `_BUILTIN_SOURCE_IDS` set-lookup and regex check now run before the blocking rate-limit API call in `resolve_source_focus`.
+
+---
+
+## [0.13.0] - 2026-06-29
+
+### Added
+
+- **Thread Library (FREE — no quota cost)** — A complete, natively-implemented feature to browse, retrieve, and resume past Perplexity conversations via CLI and MCP.
+  - **CLI Commands**: `pwm threads` for browsing and `pwm export` for JSON backups of your entire history.
+  - **MCP Tools**: `pplx_list_threads` and `pplx_get_thread`.
+  - **MCP Resources**: `perplexity://library` and `perplexity://thread/{slug}`.
+  - **Resume Conversations**: Any past conversation can now be resumed by passing the thread slug as `conversation_id` to any query tool.
+  - *Special thanks and credit to Kyle Brodeur for the endpoint discovery in [kylebrodeur/perplexity-exporter](https://github.com/kylebrodeur/perplexity-exporter) which inspired this feature! We decided to grab the thread aspect from his repo and implement it directly against the REST API for maximum performance.*
+
+## [0.12.5] - 2026-06-25
+
+### Fixed
+
+- **Antigravity MCP config path** — Corrected the Antigravity `setup.py` path to properly configure the server in the global `~/.gemini/config/mcp_config.json` location instead of `~/.gemini/antigravity/mcp_config.json`.
+- **Model tests** — Updated the `nemotron` model resolution in the test suite to expect the new `nv_nemotron_3_ultra` identifier.
+- **Connection error diagnostics** — Improved HTTP error formatting to clearly mention blocked endpoints and network issues, making token debugging easier.
+
+---
+
+## [0.12.4] - 2026-06-14
 
 ### Added
 
@@ -61,7 +221,7 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 
 ### Fixed
 
-- **Skill install tool detection** — The `pwm skill install all` detection logic was checking whether the `skills/` subdirectory existed inside a tool's config folder, which only gets created *after* the first skill install. This falsely concluded tools like Claude Code or Cursor weren't installed even when they were. Replaced `_is_tool_detected()` with `_is_tool_installed()` which checks two independent signals (either sufficient): binary on PATH via `shutil.which()`, or the tool's root config directory existing (e.g. `~/.claude`, `~/.cursor`). Each tool now declares its `binary` name and `root_dirs` in the `SkillTarget` dataclass.
+- **Skill install tool detection** — The `pwm skill install all` detection logic was checking whether the `skills/` subdirectory existed inside a tool's config folder, which only gets created _after_ the first skill install. This falsely concluded tools like Claude Code or Cursor weren't installed even when they were. Replaced `_is_tool_detected()` with `_is_tool_installed()` which checks two independent signals (either sufficient): binary on PATH via `shutil.which()`, or the tool's root config directory existing (e.g. `~/.claude`, `~/.cursor`). Each tool now declares its `binary` name and `root_dirs` in the `SkillTarget` dataclass.
 - **Clearer detection warning** — "No supported tools detected" message now explains what was checked ("No binary on PATH and no config directory found") instead of the old confusing output.
 
 ### Added
@@ -356,7 +516,6 @@ All notable changes to **perplexity-web-mcp-cli** are documented in this file.
 - MCP tool count updated to 21 across all documentation surfaces.
 
 ---
-
 
 ## [0.8.2] - 2026-03-05
 

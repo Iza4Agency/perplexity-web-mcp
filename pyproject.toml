@@ -1,6 +1,7 @@
 [project]
 name = "perplexity-web-mcp-cli"
-version = "0.12.4"
+version = "0.14.9"
+
 description = "CLI, MCP server, and Anthropic/OpenAI API-compatible interface for Perplexity AI."
 authors = [{ name = "Jacob BD" }]
 license = "MIT"
@@ -27,6 +28,7 @@ dependencies = [
     "orjson>=3.11.6,<4.0",
     "pydantic>=2.12.5,<3.0",
     "tenacity>=9.1.2,<10.0",
+    "tomli>=2.0.0,<3.0; python_version < '3.11'",
     "python-dotenv>=1.0.0,<2.0",
     "rich>=13.0.0,<15.0",
     "rich-click>=1.8",
@@ -83,6 +85,28 @@ ignore = [
     "PLR0912",   # Too many branches (complex validation logic is acceptable)
     "PLR0913",   # Too many arguments in function definition (common in APIs)
     "PLR2004",   # Magic value used in comparison (too strict for general use)
+    "PLC0415",   # import should be at the top-level of a file (common in tests)
+    "E501",      # Line too long
+    "PLR0911",   # Too many return statements
+    "PERF401",   # Use list.extend
+    "SIM108",    # Use ternary operator
+    "SIM105",    # Use contextlib.suppress
+    "F841",      # Local variable assigned to but never used
+    "SIM117",    # Use a single with statement
+    "PLR0915",   # Too many statements
+    "PLW1510",   # subprocess.run without check argument
+    "B007",      # Loop control variable not used
+    "RUF005",    # Consider unpacking instead of concatenation
+    "PLW0603",   # Using global statement
+    "B904",      # Within except, raise from err
+    "E402",      # Module level import not at top
+    "PLW2901",   # loop variable overwritten
+    "PIE810",    # call startswith once with tuple
+    "PTH118",    # os.path.join
+    "PTH113",    # os.path.isfile
+    "SIM102",    # single if statement
+    "RUF100",    # unused noqa
+    "PTH111",    # os.path.expanduser
 ]
 fixable = ["ALL"]
 dummy-variable-rgx = "^_$"
@@ -115,3 +139,9 @@ module-name = "perplexity_web_mcp"
 [build-system]
 requires = ["uv_build"]
 build-backend = "uv_build"
+
+[tool.pyright]
+exclude = ["tests"]
+
+[tool.mypy]
+exclude = ["^tests/"]
