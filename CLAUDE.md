@@ -90,3 +90,53 @@ uv run --group tests pytest tests/ -v -k "not Integration"
 ## Credits
 
 Based on [perplexity-webui-scraper](https://github.com/henrique-coder/perplexity-webui-scraper) by henrique-coder.
+
+
+## Git and GitHub workflow
+Main is always deployable. Start every task from a fresh main - `git switch main && git pull
+--ff-only` - then branch: `feat/<slug>` for features, `fix/<slug>` for bugfixes, `chore/<slug>`
+for maintenance. Commit in small logical units with a Conventional Commit subject (`feat: add
+password reset endpoint`), and keep cosmetic refactors in their own commit, separate from
+behaviour changes.
+
+Finish with `/ship`. It runs this project's tests, commits, pushes, opens the pull request,
+merges it and deletes the branch, leaving you on a clean main. Do not stop at "the PR is open" -
+an unmerged branch is unfinished work, and this workspace had accumulated 21 fully-merged
+branches that were never deleted before this was automated. If the integration decision is
+genuinely open rather than already made, use `superpowers:finishing-a-development-branch`
+instead and let Mak choose.
+
+Never use `--no-verify`, never force-push the default branch, and never delete a branch that is
+not fully merged. The guard hook denies these and names an escape variable in the message; that
+escape is for a decision Mak has made out loud, not a way past a refusal.
+
+To undo something already on main, use `/rollback`: revert the squash commit on a branch and
+ship that. Never force-push main to make a change disappear.
+
+Rules, tiers and the guard itself live in `/Users/Shared/Github/.gitflow/`; `/repo-hygiene`
+audits and repairs the setup.
+
+**This project**: tier `working`. Tests: `.venv/bin/python -m pytest tests/ -q -k "not Integration"`. A push to main does not deploy anything, but the guard still denies it - work lands through a branch so every change on main is one revertible squash commit.
+
+## Code intelligence: codebase-memory-mcp (cbm)
+
+This project is indexed into the local cbm knowledge graph, exposed as the
+`codebase-memory` MCP server in both Claude Code profiles (mak@pannonian.org and
+mak@iza4.agency) and in Codex. Prefer it over Grep/Read for structural questions:
+who calls this, what breaks if I change it, what routes exist, what shape is this
+service. Use `get_architecture` to orient, then `search_graph` -> `trace_path` ->
+`get_code_snippet` to follow a chain, and `detect_changes` to map uncommitted
+edits to affected symbols. Keep grep and file reads for literals, configs,
+non-code files, and verification.
+
+Graph project name: `Users-Shared-Github-tools-perplexity-web-mcp`
+
+Re-index after significant changes made outside an MCP session:
+
+    codebase-memory-mcp cli index_repository --repo-path /Users/Shared/Github/tools/perplexity-web-mcp
+
+Indexing writes only to `~/.cache/codebase-memory-mcp` and never touches this
+working tree. The `persistence` argument, which would write a
+`.codebase-memory/graph.db.zst` snapshot plus a `.gitattributes` line into the
+repo, defaults to false - do not pass it here. A stale graph answers confidently
+and wrongly, so re-index rather than trusting an old answer.
