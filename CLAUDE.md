@@ -93,30 +93,33 @@ Based on [perplexity-webui-scraper](https://github.com/henrique-coder/perplexity
 
 
 ## Git and GitHub workflow
-Main is always deployable. Start every task from a fresh main - `git switch main && git pull
---ff-only` - then branch: `feat/<slug>` for features, `fix/<slug>` for bugfixes, `chore/<slug>`
-for maintenance. Commit in small logical units with a Conventional Commit subject (`feat: add
-password reset endpoint`), and keep cosmetic refactors in their own commit, separate from
-behaviour changes.
+Main is always deployable, and main is where work happens. There is no pull request in this
+workflow - one builder, no second reviewer, so a PR reviewed by nobody was ceremony and it came
+out on 2026-08-22. Start from a fresh main (`git switch main && git pull --ff-only`) and commit
+there. Take a `feat/<slug>` branch only when you actually want the isolation - a risky experiment,
+or work you might throw away - and `/ship` will fold it back as one commit and delete it.
 
-Finish with `/ship`. It runs this project's tests, commits, pushes, opens the pull request,
-merges it and deletes the branch, leaving you on a clean main. Do not stop at "the PR is open" -
-an unmerged branch is unfinished work, and this workspace had accumulated 21 fully-merged
-branches that were never deleted before this was automated. If the integration decision is
-genuinely open rather than already made, use `superpowers:finishing-a-development-branch`
-instead and let Mak choose.
+Commit in small logical units with a Conventional Commit subject (`feat: add password reset
+endpoint`), and keep cosmetic refactors in their own commit, separate from behaviour changes. One
+task should land as one commit, because that is what makes `git revert <sha>` a real undo button.
 
-Never use `--no-verify`, never force-push the default branch, and never delete a branch that is
-not fully merged. The guard hook denies these and names an escape variable in the message; that
-escape is for a decision Mak has made out loud, not a way past a refusal.
+Finish with `/ship`. It runs this project's tests, reads the whole diff, commits, pushes, and
+reports the SHA to revert if it turns out wrong. Do not stop at "committed" - an unpushed commit
+is unfinished work. If the integration decision is genuinely open rather than already made, use
+`superpowers:finishing-a-development-branch` instead and let Mak choose.
 
-To undo something already on main, use `/rollback`: revert the squash commit on a branch and
-ship that. Never force-push main to make a change disappear.
+The tests are now the only automated gate in front of main, so never use `--no-verify`, never
+force-push the default branch, and never delete a branch that is not fully merged. The guard hook
+denies these and names an escape variable in the message; that escape is for a decision Mak has
+made out loud, not a way past a refusal.
+
+To undo something already on main, use `/rollback`: revert the commit and push the revert. Never
+force-push main to make a change disappear.
 
 Rules, tiers and the guard itself live in `/Users/Shared/Github/.gitflow/`; `/repo-hygiene`
 audits and repairs the setup.
 
-**This project**: tier `working`. Tests: `.venv/bin/python -m pytest tests/ -q -k "not Integration"`. A push to main does not deploy anything, but the guard still denies it - work lands through a branch so every change on main is one revertible squash commit.
+**This project**: tier `working`. Tests: `.venv/bin/python -m pytest tests/ -q -k "not Integration"`. A push to main does not deploy anything and goes through without a prompt. The test command is the gate.
 
 ## Code intelligence: codebase-memory-mcp (cbm)
 
